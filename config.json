@@ -1,0 +1,66 @@
+{
+  "proxy": {
+    "host": "127.0.0.1",
+    "port": 8080,
+    "upstream_openai": "https://api.openai.com",
+    "upstream_anthropic": "https://api.anthropic.com",
+    "upstream_gemini": "https://generativelanguage.googleapis.com",
+    "upstream_ollama": "http://127.0.0.1:11434"
+  },
+  "limits": {
+    "monthly_budget_usd": 0.0,
+    "monthly_token_budget": 0,
+    "alert_percent": 80,
+    "block_on_budget_exceeded": false
+  },
+  "database": {
+    "path": "odotoken.db"
+  },
+  "token_counter": {
+    "enabled": true,
+    "default_model": "gpt-4o-mini",
+    "default_provider": "openai",
+    "max_request_tokens": 1000000,
+    "max_batch_items": 100,
+    "max_batch_tokens": 5000000,
+    "cache_enabled": true,
+    "cache_ttl_seconds": 3600,
+    "cache_max_size": 10000,
+    "providers": {
+      "openai": {
+        "enabled": true,
+        "api_key_env": "OPENAI_API_KEY",
+        "base_url": "https://api.openai.com",
+        "timeout_seconds": 30,
+        "max_retries": 3,
+        "count_endpoint": "/v1/tokens/count"
+      },
+      "anthropic": {
+        "enabled": true,
+        "api_key_env": "ANTHROPIC_API_KEY",
+        "base_url": "https://api.anthropic.com",
+        "timeout_seconds": 30,
+        "max_retries": 3,
+        "count_endpoint": "/v1/messages/count_tokens"
+      },
+      "gemini": {
+        "enabled": true,
+        "api_key_env": "GEMINI_API_KEY",
+        "base_url": "https://generativelanguage.googleapis.com",
+        "timeout_seconds": 30,
+        "max_retries": 3,
+        "count_endpoint": "/v1/models/{model}:countTokens"
+      },
+      "ollama": {
+        "enabled": false,
+        "base_url": "http://127.0.0.1:11434",
+        "timeout_seconds": 30,
+        "max_retries": 3
+      }
+    },
+    "heuristic": {
+      "chars_per_token": 4.0,
+      "words_per_token": 0.75
+    }
+  }
+}

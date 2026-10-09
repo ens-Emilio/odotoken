@@ -1,0 +1,254 @@
+"""FastAPI Reverse Proxy with transparent token metering and budget enforcement."""
+
+from __future__ import annotations
+
+from contextlib import asynccontextmanager
+import json
+import logging
+import time
+from typing import Any, AsyncGenerator
+from urllib.parse import urljoin
+
+import httpx
+from fastapi import FastAPI, HTTPException, Request, Response
+from fastapi.responses import JSONResponse, StreamingResponse
+
+from odotoken.api.proxy_middleware import create_preflight_middleware
+from odotoken.db import Database, TokenEvent
+from odotoken.guard import Guard, GuardLimits
+from odotoken.parser import StreamUsageAccumulator, UsageParser
+from odotoken.pricing import PricingCalculator
+
+logger = logging.getLogger("odotoken.proxy")
+
+
+def create_proxy_app(
+    db: Database,
+    pricing: PricingCalculator,
+    guard: Guard,
+    config: dict[str, Any],
+) -> FastAPI:
+    client_timeout = httpx.Timeout(connect=15.0, read=300.0, write=60.0, pool=30.0)
+    http_client = httpx.AsyncClient(timeout=client_timeout, follow_redirects=True)
+
+    @asynccontextmanager
+    async def lifespan(app: FastAPI):
+        yield
+        await http_client.aclose()
+
+    app = FastAPI(title="odotoken - AI Token Proxy", version="0.1.0", lifespan=lifespan)
+
+    # Add pre-flight token counting middleware if enabled in config
+    token_counter_cfg = config.get("token_counter", {})
+    if token_counter_cfg.get("enabled", False):
+        preflight_middleware = create_preflight_middleware(
+            config_path=config.get("_config_path", "config.json"),
+            enabled=token_counter_cfg.get("enabled", False),
+            block_on_limit=token_counter_cfg.get("block_on_budget_exceeded", False),
+        )
+        app.add_middleware(preflight_middleware)
+        logger.info("Pre-flight token counting middleware enabled")
+
+    providers_config = config.get("providers", {
+        "anthropic": {"upstream_url": "https://api.anthropic.com"},
+        "openai": {"upstream_url": "https://api.openai.com"},
+        "gemini": {"upstream_url": "https://generativelanguage.googleapis.com"},
+        "ollama": {"upstream_url": "http://localhost:11434"},
+    })
+    def determine_upstream(path: str, headers: dict[str, str]) -> tuple[str, str]:
+        """Returns (provider_name, target_base_url)."""
+        # 1. Explicit path prefix routing: /anthropic/v1/... or /openai/v1/...
+        for p_name in ["anthropic", "openai", "gemini", "ollama"]:
+            if path.startswith(f"/{p_name}/"):
+                target = providers_config.get(p_name, {}).get("upstream_url", "")
+                return p_name, target
+
+        # 2. Inferred from headers or standard endpoints
+        inferred = UsageParser.identify_provider(path, headers)
+        target = providers_config.get(inferred, {}).get("upstream_url", "https://api.openai.com")
+        return inferred, target
+
+    def prepare_forward_path(path: str, provider: str) -> str:
+        """Strip provider prefix if present, e.g. /anthropic/v1/messages -> /v1/messages."""
+        prefix = f"/{provider}"
+        if path.startswith(prefix):
+            stripped = path[len(prefix):]
+            return stripped if stripped.startswith("/") else f"/{stripped}"
+        return path
+
+    @app.api_route("/{path:path}", methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "HEAD", "PATCH"])
+    async def proxy_handler(request: Request, path: str):
+        # Allow health check
+        if path == "health":
+            return JSONResponse({"status": "ok", "service": "odotoken"})
+        if path == "favicon.ico":
+            raise HTTPException(status_code=404, detail="Not a proxy route")
+
+        headers = {k.lower(): v for k, v in request.headers.items()}
+        # Remove host header to avoid SSL/SNI conflicts with upstream
+        headers.pop("host", None)
+        headers.pop("content-length", None)
+
+        # Budget Check
+        check = guard.check_allowance()
+        if not check.allowed:
+            logger.warning("Request blocked by guard: %s", check.reason)
+            return JSONResponse(
+                status_code=429,
+                content={
+                    "error": {
+                        "type": "odotoken_budget_limit_exceeded",
+                        "message": f"odotoken Guard: {check.reason}",
+                    }
+                },
+            )
+
+        provider, upstream_base = determine_upstream(request.url.path, headers)
+        client_app = UsageParser.identify_client_app(headers)
+        forward_path = prepare_forward_path(request.url.path, provider)
+        target_url = urljoin(upstream_base.rstrip("/") + "/", forward_path.lstrip("/"))
+        if request.url.query:
+            target_url = f"{target_url}?{request.url.query}"
+
+        body = await request.body()
+        fallback_model = ""
+        is_stream = False
+        if body:
+            try:
+                body_json = json.loads(body)
+                if isinstance(body_json, dict):
+                    fallback_model = body_json.get("model", "")
+                    is_stream = bool(body_json.get("stream", False))
+            except Exception:
+                pass
+
+        start_time = time.perf_counter()
+
+        try:
+            req = http_client.build_request(
+                method=request.method,
+                url=target_url,
+                headers=headers,
+                content=body,
+            )
+            response = await http_client.send(req, stream=True)
+        except Exception as exc:
+            logger.error("Failed to forward request to %s: %s", target_url, exc)
+            return JSONResponse(
+                status_code=502,
+                content={"error": {"type": "odotoken_proxy_error", "message": str(exc)}},
+            )
+
+        resp_headers = dict(response.headers)
+        # Remove hop-by-hop & compression headers that cause streaming issues
+        resp_headers.pop("content-encoding", None)
+        resp_headers.pop("content-length", None)
+        resp_headers.pop("transfer-encoding", None)
+        content_type = resp_headers.get("content-type", "")
+
+        is_sse = "text/event-stream" in content_type or is_stream
+
+        if is_sse:
+            # Handle streaming response
+            accumulator = StreamUsageAccumulator(provider=provider, default_model=fallback_model)
+
+            async def stream_generator() -> AsyncGenerator[bytes, None]:
+                try:
+                    async for chunk in response.aiter_bytes():
+                        accumulator.process_chunk(chunk)
+                        yield chunk
+                finally:
+                    await response.aclose()
+                    latency_ms = (time.perf_counter() - start_time) * 1000.0
+                    usage = accumulator.finalize()
+                    cost = pricing.calculate_cost(
+                        model=usage.model,
+                        prompt_tokens=usage.prompt_tokens,
+                        completion_tokens=usage.completion_tokens,
+                        cache_read_tokens=usage.cache_read_tokens,
+                        cache_write_tokens=usage.cache_write_tokens,
+                    )
+                    db.record_event(
+                        TokenEvent(
+                            provider=provider,
+                            model=usage.model,
+                            client_app=client_app,
+                            prompt_tokens=usage.prompt_tokens,
+                            completion_tokens=usage.completion_tokens,
+                            total_tokens=usage.total_tokens,
+                            cache_read_tokens=usage.cache_read_tokens,
+                            cache_write_tokens=usage.cache_write_tokens,
+                            cost_usd=cost,
+                            latency_ms=round(latency_ms, 2),
+                            status_code=response.status_code,
+                        )
+                    )
+
+            return StreamingResponse(
+                stream_generator(),
+                status_code=response.status_code,
+                headers=resp_headers,
+                media_type="text/event-stream",
+            )
+
+        else:
+            # Handle standard non-streaming response
+            raw_content = await response.aread()
+            await response.aclose()
+            latency_ms = (time.perf_counter() - start_time) * 1000.0
+
+            model_name = fallback_model
+            prompt_tokens = 0
+            completion_tokens = 0
+            cache_read = 0
+            cache_write = 0
+
+            try:
+                res_json = json.loads(raw_content)
+                if isinstance(res_json, dict):
+                    usage = UsageParser.parse_json_response(provider, res_json, fallback_model=fallback_model)
+                    model_name = usage.model
+                    prompt_tokens = usage.prompt_tokens
+                    completion_tokens = usage.completion_tokens
+                    cache_read = usage.cache_read_tokens
+                    cache_write = usage.cache_write_tokens
+            except Exception:
+                pass
+
+            cost = pricing.calculate_cost(
+                model=model_name,
+                prompt_tokens=prompt_tokens,
+                completion_tokens=completion_tokens,
+                cache_read_tokens=cache_read,
+                cache_write_tokens=cache_write,
+            )
+
+            db.record_event(
+                TokenEvent(
+                    provider=provider,
+                    model=model_name,
+                    client_app=client_app,
+                    prompt_tokens=prompt_tokens,
+                    completion_tokens=completion_tokens,
+                    total_tokens=prompt_tokens + completion_tokens,
+                    cache_read_tokens=cache_read,
+                    cache_write_tokens=cache_write,
+                    cost_usd=cost,
+                    latency_ms=round(latency_ms, 2),
+                    status_code=response.status_code,
+                )
+            )
+
+            # Add post-flight token headers
+            response_headers = dict(resp_headers)
+            response_headers["X-Postflight-Tokens"] = str(prompt_tokens + completion_tokens)
+            response_headers["X-Postflight-Prompt-Tokens"] = str(prompt_tokens)
+            response_headers["X-Postflight-Completion-Tokens"] = str(completion_tokens)
+
+            return JSONResponse(
+                content=res_json if 'res_json' in locals() else {},
+                status_code=response.status_code,
+                headers=response_headers,
+            )
+
+    return app
