@@ -1,4 +1,4 @@
-"""Configuration loader for token counter."""
+"""Token counter configuration loader."""
 
 from __future__ import annotations
 

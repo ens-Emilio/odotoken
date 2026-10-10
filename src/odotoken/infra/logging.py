@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import sys
 import time
 from contextlib import contextmanager
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from typing import Any
 
 
@@ -92,9 +94,6 @@ class JsonFormatter(logging.Formatter):
     """JSON log formatter for structured logging."""
 
     def format(self, record: logging.LogRecord) -> str:
-        import json
-        from datetime import datetime, timezone
-
         log_data = {
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "level": record.levelname,

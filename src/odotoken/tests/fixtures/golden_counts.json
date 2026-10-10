@@ -1,0 +1,68 @@
+{
+  "version": "1.0.0",
+  "description": "Golden token counts for regression testing",
+  "test_cases": [
+    {
+      "name": "simple_english",
+      "model": "gpt-4o-mini",
+      "text": "Hello world",
+      "expected_tokens": 3,
+      "method": "heuristic",
+      "tolerance": 1
+    },
+    {
+      "name": "english_sentence",
+      "model": "gpt-4o-mini",
+      "text": "The quick brown fox jumps over the lazy dog.",
+      "expected_tokens": 10,
+      "method": "heuristic",
+      "tolerance": 2
+    },
+    {
+      "name": "portuguese_text",
+      "model": "gpt-4o-mini",
+      "text": "Olá mundo, como vai você?",
+      "expected_tokens": 8,
+      "method": "heuristic",
+      "tolerance": 2
+    },
+    {
+      "name": "with_emoji",
+      "model": "gpt-4o-mini",
+      "text": "Hello 😀 world 🎉",
+      "expected_tokens": 6,
+      "method": "heuristic",
+      "tolerance": 2
+    },
+    {
+      "name": "multiline",
+      "model": "gpt-4o-mini",
+      "text": "Line 1\nLine 2\nLine 3",
+      "expected_tokens": 6,
+      "method": "heuristic",
+      "tolerance": 2
+    },
+    {
+      "name": "chat_simple",
+      "model": "gpt-4o-mini",
+      "messages": [
+        {"role": "user", "content": "Hello"}
+      ],
+      "expected_tokens": 8,
+      "method": "heuristic",
+      "tolerance": 2
+    },
+    {
+      "name": "chat_conversation",
+      "model": "gpt-4o-mini",
+      "messages": [
+        {"role": "system", "content": "You are helpful"},
+        {"role": "user", "content": "Hi"},
+        {"role": "assistant", "content": "Hello! How can I help?"}
+      ],
+      "expected_tokens": 20,
+      "method": "heuristic",
+      "tolerance": 5
+    }
+  ]
+}

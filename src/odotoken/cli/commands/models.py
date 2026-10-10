@@ -12,6 +12,7 @@ from odotoken.infra.config import get_token_counter_config, load_config
 from odotoken.services.model_catalog import ModelCatalog
 from odotoken.services.token_counter import TokenCounter
 from odotoken.services.cache import TokenCache
+from odotoken.domain.errors import ModelNotSupportedError
 
 console = Console()
 models_app = typer.Typer(name="models", help="List and manage models")
@@ -88,7 +89,7 @@ def model_info(
 
         try:
             m = counter.get_model_info(model_id)
-        except Exception:
+        except ModelNotSupportedError:
             console.print(f"[red]Model not found: {model_id}[/red]")
             raise typer.Exit(1)
 

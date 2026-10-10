@@ -62,6 +62,10 @@ class BatchCountResponse(BaseModel):
     errors: list[dict] = []
 
 
+# Module-level singleton for Depends
+_token_counter_dep: TokenCounter | None = None
+
+
 def get_token_counter(request: Request) -> TokenCounter:
     """Dependency to get TokenCounter from app state."""
     return request.app.state.token_counter

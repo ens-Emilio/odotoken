@@ -1,0 +1,5 @@
+{"model": "gpt-4o-mini", "text": "Explain quantum computing in simple terms"}
+{"model": "gpt-4o", "text": "Write a Python function to calculate fibonacci numbers"}
+{"model": "claude-3-5-sonnet-20241022", "messages": [{"role": "user", "content": "What is the capital of France?"}]}
+{"model": "gemini-1.5-flash", "text": "Summarize the benefits of renewable energy"}
+{"model": "llama3-8b", "messages": [{"role": "system", "content": "You are a helpful assistant"}, {"role": "user", "content": "Hello"}]}

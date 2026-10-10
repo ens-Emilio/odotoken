@@ -6,6 +6,7 @@ import hashlib
 import time
 from collections import OrderedDict
 from dataclasses import dataclass
+from typing import Any
 
 from odotoken.domain.entities import CountRequest, CountResult, ModelInfo
 from odotoken.infra.config import TokenCounterConfig

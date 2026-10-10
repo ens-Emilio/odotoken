@@ -1,0 +1,22 @@
+[
+  {
+    "role": "system",
+    "content": "You are a helpful coding assistant that provides clear, concise answers."
+  },
+  {
+    "role": "user",
+    "content": "How do I read a JSON file in Python?"
+  },
+  {
+    "role": "assistant",
+    "content": "You can use the built-in `json` module:\n\n```python\nimport json\n\nwith open('data.json', 'r') as f:\n    data = json.load(f)\n```"
+  },
+  {
+    "role": "user",
+    "content": "What about writing JSON?"
+  },
+  {
+    "role": "assistant",
+    "content": "Use `json.dump()`:\n\n```python\nimport json\n\nwith open('output.json', 'w') as f:\n    json.dump(data, f, indent=2)\n```"
+  }
+]
