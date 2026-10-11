@@ -7,7 +7,8 @@ from pathlib import Path
 from typing import Any, Optional
 
 from fastapi import FastAPI, Request
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
 
 from odotoken.db import Database
 from odotoken.guard import Guard
@@ -361,9 +362,18 @@ DASHBOARD_HTML = """<!DOCTYPE html>
 
 
 def register_dashboard_routes(app: FastAPI, db: Database, guard: Optional[Guard] = None) -> None:
-    @app.get("/dashboard", response_class=HTMLResponse)
-    async def dashboard_view():
-        return HTMLResponse(content=DASHBOARD_HTML)
+    # Serve the built React dashboard (frontend/ → pnpm build → src/odotoken/static)
+    static_dir = Path(__file__).parent / "static"
+    if (static_dir / "index.html").exists():
+        app.mount("/app", StaticFiles(directory=str(static_dir), html=True), name="dashboard")
+
+        @app.get("/dashboard", response_class=HTMLResponse)
+        async def dashboard_view():
+            return FileResponse(str(static_dir / "index.html"))
+
+        @app.get("/", response_class=HTMLResponse)
+        async def root_view():
+            return FileResponse(str(static_dir / "index.html"))
 
     @app.get("/api/stats")
     async def stats_api(since: Optional[str] = None):
@@ -380,11 +390,19 @@ def register_dashboard_routes(app: FastAPI, db: Database, guard: Optional[Guard]
                 "limits": {
                     "daily_cost_limit_usd": guard.limits.daily_cost_limit_usd,
                     "monthly_cost_limit_usd": guard.limits.monthly_cost_limit_usd,
+                    "daily_tokens_limit": guard.limits.daily_tokens_limit,
+                    "monthly_tokens_limit": guard.limits.monthly_tokens_limit,
                     "action_on_breach": guard.limits.action_on_breach,
                 },
                 "status": check.status,
                 "allowed": check.allowed,
                 "reason": check.reason,
+                "current": {
+                    "daily_cost_usd": check.current_daily_cost,
+                    "monthly_cost_usd": check.current_monthly_cost,
+                    "daily_tokens": check.current_daily_tokens,
+                    "monthly_tokens": check.current_monthly_tokens,
+                },
             }
 
         return JSONResponse({

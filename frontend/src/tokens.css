@@ -1,0 +1,104 @@
+/* ============================================================
+   odotoken — neutral product workspace (inspired by open-design)
+   Neutrals carry the interface; brand green is reserved for
+   sparse feedback and brand emphasis.
+   ============================================================ */
+:root {
+  --bg: #ffffff;
+  --bg-app: #ffffff;
+  --bg-panel: #fafafa;
+  --bg-subtle: #ededed;
+  --bg-muted: #dbdbdb;
+  --bg-fill-tertiary: rgba(0, 0, 0, 0.03);
+  --bg-fill-secondary: rgba(0, 0, 0, 0.06);
+  --bg-fill: rgba(0, 0, 0, 0.12);
+  --bg-elevated: #fafafa;
+
+  /* Liquid Glass — frosted material for floating layers */
+  --glass-regular: rgba(250, 250, 250, 0.66);
+  --glass-regular-blur: 28px;
+  --glass-edge-highlight: color-mix(in srgb, #fff 65%, transparent);
+
+  --border: #dbdbdb;
+  --border-strong: #bdbdbd;
+  --border-soft: #ededed;
+
+  --text: #494949;
+  --text-strong: #202020;
+  --text-muted: #5c5c5c;
+  --text-soft: #848484;
+  --text-faint: #bdbdbd;
+
+  --accent: #353535;
+  --accent-contrast: #fafafa;
+  --brand: #87ea5c;
+  --brand-weak: #d0ffb5;
+  --brand-soft: #ebffde;
+  --brand-text: #0d5400;
+  --brand-ink: #007106;
+  --brand-surface: #f2fff2;
+
+  --warn: #ff9500;
+  --warn-soft: #fff4e5;
+  --warn-ink: #7a4a00;
+  --danger: #ff3b30;
+  --danger-soft: #ffebeb;
+  --danger-ink: #7a0e0a;
+
+  --chart-1: #007106;
+  --chart-2: #353535;
+  --chart-3: #ff9500;
+  --chart-4: #848484;
+  --chart-5: #ff3b30;
+  --chart-6: #87ea5c;
+  --chart-7: #5c5c5c;
+
+  --radius: 10px;
+  --shadow-panel: 0 1px 2px rgba(0,0,0,0.04), 0 4px 16px rgba(0,0,0,0.04);
+  --shadow-pop: 0 4px 12px rgba(0,0,0,0.08), 0 12px 40px rgba(0,0,0,0.12);
+}
+
+.dark {
+  --bg: #161616;
+  --bg-app: #161616;
+  --bg-panel: #1e1e1e;
+  --bg-subtle: #2a2a2a;
+  --bg-muted: #3a3a3a;
+  --bg-fill-tertiary: rgba(255, 255, 255, 0.04);
+  --bg-fill-secondary: rgba(255, 255, 255, 0.08);
+  --bg-fill: rgba(255, 255, 255, 0.14);
+  --bg-elevated: #1e1e1e;
+
+  --glass-regular: rgba(30, 30, 30, 0.66);
+  --glass-edge-highlight: color-mix(in srgb, #fff 12%, transparent);
+
+  --border: #2f2f2f;
+  --border-strong: #454545;
+  --border-soft: #262626;
+
+  --text: #c4c4c4;
+  --text-strong: #f2f2f2;
+  --text-muted: #a8a8a8;
+  --text-soft: #787878;
+  --text-faint: #545454;
+
+  --accent: #f2f2f2;
+  --accent-contrast: #202020;
+  --brand-soft: #1d3314;
+  --brand-surface: #1a2612;
+  --brand-text: #87ea5c;
+  --brand-ink: #87ea5c;
+
+  --warn-soft: #33200a;
+  --warn-ink: #ffb84d;
+  --danger-soft: #330d0a;
+  --danger-ink: #ff8a80;
+
+  --chart-1: #87ea5c;
+  --chart-2: #c4c4c4;
+  --chart-3: #ffb84d;
+  --chart-4: #787878;
+  --chart-5: #ff8a80;
+  --chart-6: #87ea5c;
+  --chart-7: #a8a8a8;
+}
