@@ -97,6 +97,18 @@ class UsageParser:
             res.completion_tokens = data.get("eval_count", 0)
             res.total_tokens = res.prompt_tokens + res.completion_tokens
 
+        else:
+            # Custom providers (verboo, kodeo, useoneai, pegasus, cheapestinference…)
+            # are OpenAI-compatible: use the OpenAI shape, falling back to
+            # Anthropic-style keys for routers that translate the format.
+            usage = data.get("usage", {})
+            res.prompt_tokens = usage.get("prompt_tokens", usage.get("input_tokens", 0))
+            res.completion_tokens = usage.get("completion_tokens", usage.get("output_tokens", 0))
+            res.total_tokens = usage.get("total_tokens", res.prompt_tokens + res.completion_tokens)
+            details = usage.get("prompt_tokens_details", {})
+            if isinstance(details, dict):
+                res.cache_read_tokens = details.get("cached_tokens", 0)
+
         return res
 
 
@@ -176,6 +188,18 @@ class StreamUsageAccumulator:
                 self.completion_tokens = usage.get("candidatesTokenCount", self.completion_tokens)
                 self.total_tokens = usage.get("totalTokenCount", self.total_tokens)
                 self.cache_read_tokens = usage.get("cachedContentTokenCount", self.cache_read_tokens)
+
+        else:
+            # Custom OpenAI-compatible providers: usage arrives in a final
+            # chunk (often with empty choices) or alongside "type": "usage".
+            if "usage" in data and data["usage"]:
+                usage = data["usage"]
+                self.prompt_tokens = usage.get("prompt_tokens", usage.get("input_tokens", self.prompt_tokens))
+                self.completion_tokens = usage.get("completion_tokens", usage.get("output_tokens", self.completion_tokens))
+                self.total_tokens = usage.get("total_tokens", self.total_tokens)
+                details = usage.get("prompt_tokens_details", {})
+                if isinstance(details, dict):
+                    self.cache_read_tokens = details.get("cached_tokens", self.cache_read_tokens)
 
     def finalize(self) -> UsageResult:
         if not self.total_tokens:

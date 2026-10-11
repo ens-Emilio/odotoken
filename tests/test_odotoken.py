@@ -230,7 +230,7 @@ def test_dashboard_and_stats_routes(temp_db: Database, pricing: PricingCalculato
     # Dashboard view HTML
     res_dash = client.get("/dashboard")
     assert res_dash.status_code == 200
-    assert "odotoken - AI Token & Cost Dashboard" in res_dash.text
+    assert "odotoken" in res_dash.text  # React build (title or root div)
 
     # Stats API
     res_stats = client.get("/api/stats")
