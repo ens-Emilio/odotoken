@@ -15,6 +15,7 @@ from rich.table import Table
 from odotoken.api.app import create_app
 from odotoken.cli.commands.count import get_count_app
 from odotoken.cli.commands.models import get_models_app
+from odotoken.dashboard import register_dashboard_routes
 from odotoken.db import Database
 from odotoken.guard import Guard, GuardLimits
 from odotoken.infra.config import get_token_counter_config
@@ -65,7 +66,6 @@ def start(
 
     db_path = cfg.get("database", {}).get("path", "odotoken.db")
     database = Database(db_path)
-    pricing = PricingCalculator(cfg.get("prices", "prices.json"))
 
     limits_cfg = cfg.get("limits", {})
     guard_limits = GuardLimits(
@@ -77,10 +77,11 @@ def start(
     )
     guard = Guard(database, guard_limits)
 
-    proxy_app = create_proxy_app(database, pricing, guard, cfg)
-    # Dashboard routes would be registered here if needed
+    proxy_app = create_proxy_app(database, PricingCalculator(cfg.get("prices", "prices.json")), guard, cfg)
+    register_dashboard_routes(proxy_app, database, guard)
 
     console.print(f"[green]Starting odotoken proxy on {actual_host}:{actual_port}[/green]")
+    console.print(f"[green]Dashboard: http://{actual_host}:{actual_port}/dashboard[/green]")
     uvicorn.run(proxy_app, host=actual_host, port=actual_port, workers=workers, reload=reload, log_level="info")
 
 
@@ -161,7 +162,6 @@ def stats(
     cfg = load_config_file(DEFAULT_CONFIG_PATH)
     db_path = cfg.get("database", {}).get("path", "odotoken.db")
     database = Database(db_path)
-    pricing = PricingCalculator(cfg.get("prices", "prices.json"))
 
     if by_model:
         results = database.get_summary_by_model(since=since)

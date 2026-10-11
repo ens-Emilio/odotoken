@@ -6,16 +6,15 @@ from contextlib import asynccontextmanager
 import json
 import logging
 import time
-from typing import Any, AsyncGenerator
+from typing import Any
 from urllib.parse import urljoin
 
 import httpx
-from fastapi import FastAPI, HTTPException, Request, Response
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 
-from odotoken.api.proxy_middleware import create_preflight_middleware
 from odotoken.db import Database, TokenEvent
-from odotoken.guard import Guard, GuardLimits
+from odotoken.guard import Guard
 from odotoken.parser import StreamUsageAccumulator, UsageParser
 from odotoken.pricing import PricingCalculator
 
@@ -38,29 +37,20 @@ def create_proxy_app(
 
     app = FastAPI(title="odotoken - AI Token Proxy", version="0.1.0", lifespan=lifespan)
 
-    # Add pre-flight token counting middleware if enabled in config
-    token_counter_cfg = config.get("token_counter", {})
-    if token_counter_cfg.get("enabled", False):
-        preflight_middleware = create_preflight_middleware(
-            config_path=config.get("_config_path", "config.json"),
-            enabled=token_counter_cfg.get("enabled", False),
-            block_on_limit=token_counter_cfg.get("block_on_budget_exceeded", False),
-        )
-        app.add_middleware(preflight_middleware)
-        logger.info("Pre-flight token counting middleware enabled")
-
     providers_config = config.get("providers", {
         "anthropic": {"upstream_url": "https://api.anthropic.com"},
         "openai": {"upstream_url": "https://api.openai.com"},
         "gemini": {"upstream_url": "https://generativelanguage.googleapis.com"},
         "ollama": {"upstream_url": "http://localhost:11434"},
     })
+
     def determine_upstream(path: str, headers: dict[str, str]) -> tuple[str, str]:
         """Returns (provider_name, target_base_url)."""
-        # 1. Explicit path prefix routing: /anthropic/v1/... or /openai/v1/...
-        for p_name in ["anthropic", "openai", "gemini", "ollama"]:
+        # 1. Explicit path prefix routing: /anthropic/v1/..., /openai/v1/...,
+        #    or any custom provider key: /<provider_name>/v1/...
+        for p_name in providers_config:
             if path.startswith(f"/{p_name}/"):
-                target = providers_config.get(p_name, {}).get("upstream_url", "")
+                target = providers_config[p_name].get("upstream_url", "")
                 return p_name, target
 
         # 2. Inferred from headers or standard endpoints
@@ -152,7 +142,7 @@ def create_proxy_app(
             # Handle streaming response
             accumulator = StreamUsageAccumulator(provider=provider, default_model=fallback_model)
 
-            async def stream_generator() -> AsyncGenerator[bytes, None]:
+            async def stream_generator():
                 try:
                     async for chunk in response.aiter_bytes():
                         accumulator.process_chunk(chunk)
@@ -202,6 +192,7 @@ def create_proxy_app(
             completion_tokens = 0
             cache_read = 0
             cache_write = 0
+            res_json: dict[str, Any] = {}
 
             try:
                 res_json = json.loads(raw_content)
@@ -239,16 +230,10 @@ def create_proxy_app(
                 )
             )
 
-            # Add post-flight token headers
-            response_headers = dict(resp_headers)
-            response_headers["X-Postflight-Tokens"] = str(prompt_tokens + completion_tokens)
-            response_headers["X-Postflight-Prompt-Tokens"] = str(prompt_tokens)
-            response_headers["X-Postflight-Completion-Tokens"] = str(completion_tokens)
-
             return JSONResponse(
-                content=res_json if 'res_json' in locals() else {},
+                content=res_json if res_json else None,
                 status_code=response.status_code,
-                headers=response_headers,
+                headers=resp_headers,
             )
 
     return app
