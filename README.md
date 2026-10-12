@@ -163,6 +163,35 @@ curl http://127.0.0.1:8081/v1/models
 curl http://127.0.0.1:8081/health
 ```
 
+## Model Pricing
+
+Cost tracking uses `prices.json` — **2,700+ models** with real per-1M-token rates,
+synced from three sources (later wins):
+
+| Source | Coverage | Priority |
+|---------|----------|----------|
+| [pricetoken](https://www.npmjs.com/package/pricetoken) npm package | 46 official models (OpenAI, Anthropic, Google) | 1 |
+| Pricing API (default `http://154.29.76.173`, override with `PEGASUS_PRICING_API`) | 3,500+ models via public REST API | 2 |
+| Router configs (`~/.local/share/crush/providers.json` if present) | exact prices your local routers charge | 3 (wins) |
+
+Refresh prices at any time:
+
+```bash
+npm install pricetoken
+node scripts/sync-prices.mjs
+systemctl --user restart odotoken   # or restart your odotoken process
+```
+
+Manual overrides: add `"override": true` to any entry in `prices.json` and the sync
+script will never touch it:
+
+```json
+"my-custom-model": { "input": 1.5, "output": 6.0, "cache_read": 0.2, "cache_write": 0, "override": true }
+```
+
+The public pricing API needs no auth key for reads. If you deploy your own instance,
+point `PEGASUS_PRICING_API` at it. Rate limits: nginx 10 req/s per IP, app 60 req/min.
+
 ## Proxy Headers
 
 When token counting is enabled, the proxy adds:
