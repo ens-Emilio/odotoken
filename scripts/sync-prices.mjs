@@ -3,18 +3,16 @@
  * Sync model prices into odotoken prices.json.
  *
  * Sources (later entries win for the same model id):
- *   1. pricetoken npm package — official models (bundled static pricing)
- *   2. Pegasus pricing API (default http://154.29.76.173, override PEGASUS_PRICING_API)
- *      NOTE: the API reports per-TOKEN amounts even though the unit field says
- *      "per_1m_tokens" — this script multiplies by 1M to normalize.
- *   3. crush providers.json (~/.local/share/crush/providers.json) — exact prices
- *      your local routers charge, highest priority.
+ *   1. Pricing API (default http://154.29.76.173, override PEGASUS_PRICING_API)
+ *      — public REST, 3,500+ models. Handles mixed per-token/per-1M
+ *      conventions via magnitude heuristic; retries on rate limit.
+ *   2. crush providers.json (~/.local/share/crush/providers.json) — exact
+ *      prices your local routers charge, highest priority.
  *
  * Entries with "override": true in prices.json are never touched.
  *
  * Usage: node scripts/sync-prices.mjs [--output prices.json]
  */
-import { STATIC_PRICING } from 'pricetoken';
 import { readFileSync, writeFileSync } from 'fs';
 import { homedir } from 'os';
 import { fileURLToPath } from 'url';
@@ -80,16 +78,9 @@ async function main() {
     return r && r.input === 0 && r.output === 0;
   };
 
-  let stats = { pricetoken: 0, api: 0, crush: 0, kept: overridden.size };
+  let stats = { api: 0, crush: 0, kept: overridden.size };
 
-  // 1. pricetoken official static pricing (per-1M rates)
-  for (const m of Object.values(STATIC_PRICING)) {
-    if (overridden.has(m.modelId)) continue;
-    setPrice(prices, m.modelId, m.inputPerMTok, m.outputPerMTok, prices[m.modelId]?.cache_read ?? 0);
-    stats.pricetoken++;
-  }
-
-  // 2. Pegasus pricing API (retries once on rate limit)
+  // 1. Pricing API (retries once on rate limit)
   const fetchWithRetry = async (url, tries = 3) => {
     for (let i = 0; i < tries; i++) {
       const res = await fetch(url);
@@ -129,7 +120,7 @@ async function main() {
     console.error(`warning: pricing API unreachable (${e.message}), continuing without it`);
   }
 
-  // 3. crush providers.json — exact router prices (highest priority)
+  // 2. crush providers.json — exact router prices (highest priority)
   try {
     const crush = JSON.parse(
       readFileSync(join(homedir(), '.local/share/crush/providers.json'), 'utf8')
@@ -148,7 +139,7 @@ async function main() {
     console.log('note: crush providers.json not found, skipped');
   }
 
-  // 4. Pegasus Relay wrapper models (pegasus-claude-*) wrap official Claude
+  // 3. Pegasus Relay wrapper models (pegasus-claude-*) wrap official Claude
   //    models — priced at the underlying Claude rates until the relay
   //    publishes its own pricing. Override manually in prices.json if needed.
   const pegasusWrappers = {
@@ -167,7 +158,7 @@ async function main() {
   writeFileSync(outputPath, JSON.stringify(prices, null, 2));
   console.log(
     `prices.json updated: ${Object.keys(prices).length} models ` +
-    `(pricetoken: ${stats.pricetoken}, pricing-api: ${stats.api}, crush: ${stats.crush}, overrides: ${stats.kept})`
+    `(pricing-api: ${stats.api}, crush: ${stats.crush}, overrides: ${stats.kept})`
   );
 }
 

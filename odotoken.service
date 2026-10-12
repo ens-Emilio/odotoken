@@ -4,8 +4,8 @@ After=network.target
 
 [Service]
 Type=simple
-WorkingDirectory=/home/zens/allkodex/all-kode/all-kodez/ens-kody/ProjetosA/odotoken
-ExecStart=/home/zens/allkodex/all-kode/all-kodez/ens-kody/ProjetosA/odotoken/.venv/bin/odotoken start --host 127.0.0.1 --port 8090
+WorkingDirectory=%h/odotoken
+ExecStart=%h/odotoken/.venv/bin/odotoken start --host 127.0.0.1 --port 8090
 Restart=always
 RestartSec=3
 Environment="PYTHONUNBUFFERED=1"
