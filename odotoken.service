@@ -2,6 +2,13 @@
 Description=odotoken - AI Token Proxy and Cost Metering Service
 After=network.target
 
+# TEMPLATE — do not install this file by hand if your project is not at
+# ~/odotoken. Instead, from the project root run:
+#     odotoken install-service
+# which writes ~/.config/systemd/user/odotoken.service with the correct
+# absolute paths, then:
+#     systemctl --user daemon-reload && systemctl --user enable --now odotoken
+
 [Service]
 Type=simple
 WorkingDirectory=%h/odotoken

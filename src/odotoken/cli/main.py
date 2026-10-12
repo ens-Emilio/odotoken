@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from pathlib import Path
 
 import typer
@@ -133,11 +134,23 @@ def stop():
 
 @app.command()
 def status():
-    """Check service status and port connectivity."""
+    """Check service status, systemd unit sanity and port connectivity."""
     import socket
 
     cfg = load_config_file(DEFAULT_CONFIG_PATH)
     port = cfg.get("proxy", {}).get("port", 8080)
+
+    # systemd unit sanity: does ExecStart point at an existing binary?
+    unit_path = Path.home() / ".config/systemd/user/odotoken.service"
+    if unit_path.exists():
+        exec_match = re.search(r"ExecStart=(\S+)", unit_path.read_text(encoding="utf-8"))
+        if exec_match:
+            exec_bin = exec_match.group(1)
+            if not Path(exec_bin).exists():
+                console.print(f"[bold red]unit ExecStart points to {exec_bin}, which does not exist.[/bold red]")
+                console.print("run: [green]odotoken install-service[/green] from the project directory")
+            else:
+                console.print(f"[green]unit ok: {exec_bin}[/green]")
 
     try:
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
@@ -149,6 +162,46 @@ def status():
                 console.print(f"[yellow]odotoken daemon is NOT running.[/yellow] (Port configured: {port})")
     except Exception as e:
         console.print(f"[red]Error checking status: {e}[/red]")
+
+
+@app.command("install-service")
+def install_service(
+    port: int = typer.Option(None, "--port", "-p", help="Port to bind (from config.json if omitted)"),
+):
+    """Write ~/.config/systemd/user/odotoken.service with absolute paths from this project directory."""
+    cfg = load_config_file(DEFAULT_CONFIG_PATH)
+    actual_port = port or cfg.get("proxy", {}).get("port", 8090)
+
+    project_dir = Path.cwd()
+    bin_path = project_dir / ".venv/bin/odotoken"
+    if not bin_path.exists():
+        console.print(f"[red]no odotoken binary at {bin_path}[/red]")
+        console.print("run [green]python -m venv .venv && .venv/bin/pip install -e .[/green] first, from the project root")
+        raise typer.Exit(1)
+
+    unit = f"""[Unit]
+Description=odotoken - AI Token Proxy and Cost Metering Service
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory={project_dir}
+ExecStart={bin_path} start --host 127.0.0.1 --port {actual_port}
+Restart=always
+RestartSec=3
+Environment="PYTHONUNBUFFERED=1"
+
+[Install]
+WantedBy=default.target
+"""
+    unit_dir = Path.home() / ".config/systemd/user"
+    unit_dir.mkdir(parents=True, exist_ok=True)
+    unit_path = unit_dir / "odotoken.service"
+    unit_path.write_text(unit, encoding="utf-8")
+    console.print(f"[green]wrote {unit_path}[/green]")
+    console.print(f"  WorkingDirectory={project_dir}")
+    console.print(f"  ExecStart={bin_path} start --host 127.0.0.1 --port {actual_port}")
+    console.print("now run: [green]systemctl --user daemon-reload && systemctl --user enable --now odotoken[/green]")
 
 
 @app.command()

@@ -102,9 +102,9 @@ Reinicie o CLI após mudar a config (configs carregam no boot).
 
 ```bash
 odotoken start              # proxy + dashboard
-# ou como serviço systemd de usuário:
-mkdir -p ~/.config/systemd/user
-cp odotoken.service ~/.config/systemd/user/   # edite o WorkingDirectory antes!
+# ou como serviço systemd de usuário (gera o unit com paths absolutos corretos):
+odotoken install-service
+systemctl --user daemon-reload
 systemctl --user enable --now odotoken
 ```
 
@@ -182,6 +182,25 @@ A API pública de preços não precisa de chave para leitura (rate limit: 10 req
 | `limits.action_on_breach` | `alert` ou `block` (429) | `alert` |
 | `database.path` | arquivo SQLite (modo WAL) | `odotoken.db` |
 | `token_counter.enabled` | middleware de contagem pré-flight no proxy | `false` |
+
+## Solução de problemas
+
+**Todos os CLIs falham ao mesmo tempo com `ECONNREFUSED 127.0.0.1:8090`** — o proxy caiu, não seus provedores. Triagem rápida:
+
+```bash
+odotoken status          # verifica o unit do systemd E a porta
+curl http://127.0.0.1:8090/health
+journalctl --user -u odotoken -n 50 --no-pager
+```
+
+| Sintoma | Significado | Correção |
+|---------|-------------|----------|
+| `status=203/EXEC` no journal | o path do `ExecStart` do unit não existe (projeto movido/clonado em outro lugar) | rode `odotoken install-service` na raiz do projeto |
+| `activating (auto-restart)` para sempre | serviço em loop de crash — veja o motivo no journal | corrija a causa, depois `systemctl --user restart odotoken` |
+| nada na :8090, serviço inactive | nunca foi iniciado | `systemctl --user enable --now odotoken` |
+| `/health` responde mas CLIs falham | o proxy está bem — as configs dos CLIs estão desatualizadas | reinicie o CLI (configs carregam no boot) |
+
+**Regra de triagem**: se o erro tem status HTTP (ex. 503 do provedor), o proxy entregou a requisição e o problema está acima. Se é erro de conexão sem status nenhum (`ECONNREFUSED`, "Unable to connect"), o problema é o próprio proxy.
 
 ## Notas de segurança
 

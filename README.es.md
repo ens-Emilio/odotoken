@@ -102,9 +102,9 @@ Reinicia el CLI después de cambiar su config (las configs se cargan al arrancar
 
 ```bash
 odotoken start              # proxy + dashboard
-# o como servicio systemd de usuario:
-mkdir -p ~/.config/systemd/user
-cp odotoken.service ~/.config/systemd/user/   # ¡edita el WorkingDirectory primero!
+# o como servicio systemd de usuario (genera el unit con rutas absolutas correctas):
+odotoken install-service
+systemctl --user daemon-reload
 systemctl --user enable --now odotoken
 ```
 
@@ -182,6 +182,25 @@ La API pública de precios no necesita clave para lecturas (rate limit: 10 req/s
 | `limits.action_on_breach` | `alert` o `block` (429) | `alert` |
 | `database.path` | archivo SQLite (modo WAL) | `odotoken.db` |
 | `token_counter.enabled` | middleware de conteo pre-vuelo en el proxy | `false` |
+
+## Solución de problemas
+
+**Todos los CLIs fallan a la vez con `ECONNREFUSED 127.0.0.1:8090`** — el proxy se cayó, no tus proveedores. Triaje rápido:
+
+```bash
+odotoken status          # verifica el unit de systemd Y el puerto
+curl http://127.0.0.1:8090/health
+journalctl --user -u odotoken -n 50 --no-pager
+```
+
+| Síntoma | Significado | Corrección |
+|---------|-------------|------------|
+| `status=203/EXEC` en journal | la ruta del `ExecStart` del unit no existe (proyecto movido/clonado en otro lugar) | ejecuta `odotoken install-service` en la raíz del proyecto |
+| `activating (auto-restart)` para siempre | servicio en loop de crash — mira el motivo en el journal | corrige la causa, luego `systemctl --user restart odotoken` |
+| nada en :8090, servicio inactive | nunca se inició | `systemctl --user enable --now odotoken` |
+| `/health` responde pero los CLIs fallan | el proxy está bien — las configs de los CLIs están desactualizadas | reinicia el CLI (las configs cargan al arrancar) |
+
+**Regla de triaje**: si el error tiene status HTTP (ej. 503 del proveedor), el proxy entregó la petición y el problema está más arriba. Si es un error de conexión sin ningún status (`ECONNREFUSED`, "Unable to connect"), el problema es el propio proxy.
 
 ## Notas de seguridad
 
