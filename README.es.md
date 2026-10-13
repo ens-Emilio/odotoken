@@ -204,6 +204,8 @@ journalctl --user -u odotoken -n 50 --no-pager
 
 ## Notas de seguridad
 
+- **Un solo proceso** — SQLite y la caché en memoria asumen un worker. Ejecuta `odotoken start` sin `--workers` (por defecto 1); multi-worker dividiría la medición entre procesos sin estado compartido.
+
 - El proxy hace bind en `127.0.0.1` por defecto — solo local
 - Las claves de API pasan en los headers; **nada se registra ni almacena** — solo conteos de tokens, nombres de modelos, nombre del app cliente (del User-Agent), costo y latencia
 - Colócalo detrás de autenticación/reverse-proxy antes de exponerlo en red

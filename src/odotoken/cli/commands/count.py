@@ -9,14 +9,14 @@ from pathlib import Path
 
 import typer
 from rich.console import Console
-from rich.table import Table
 from rich.progress import Progress, SpinnerColumn, TextColumn
+from rich.table import Table
 
 from odotoken.domain.entities import CountRequest
 from odotoken.infra.config import get_token_counter_config, load_config
+from odotoken.services.cache import TokenCache
 from odotoken.services.model_catalog import ModelCatalog
 from odotoken.services.token_counter import TokenCounter
-from odotoken.services.cache import TokenCache
 
 console = Console()
 count_app = typer.Typer(name="count", help="Count tokens for text or chat messages")
@@ -42,6 +42,7 @@ def count_text(
     file: str | None = typer.Option(None, "--file", "-f", help="Read text from file"),
 ) -> None:
     """Count tokens for plain text."""
+
     async def _run():
         counter = await _get_token_counter()
 
@@ -96,6 +97,7 @@ def count_chat(
     tools: bool = typer.Option(False, "--tools", help="Include empty tools array"),
 ) -> None:
     """Count tokens for chat messages."""
+
     async def _run():
         counter = await _get_token_counter()
 
@@ -163,11 +165,12 @@ def count_batch(
     max_items: int = typer.Option(100, "--max-items", help="Maximum batch size"),
 ) -> None:
     """Count tokens for batch of requests from JSONL file."""
+
     async def _run():
         counter = await _get_token_counter()
 
         requests = []
-        with open(file, "r", encoding="utf-8") as f:
+        with open(file, encoding="utf-8") as f:
             for i, line in enumerate(f):
                 if i >= max_items:
                     console.print(f"[yellow]Warning: Truncating to {max_items} items[/yellow]")
@@ -175,18 +178,22 @@ def count_batch(
                 if line.strip():
                     data = json.loads(line)
                     if "text" in data:
-                        requests.append(CountRequest(
-                            model=data.get("model", "gpt-4o-mini"),
-                            text=data["text"],
-                            provider=data.get("provider"),
-                        ))
+                        requests.append(
+                            CountRequest(
+                                model=data.get("model", "gpt-4o-mini"),
+                                text=data["text"],
+                                provider=data.get("provider"),
+                            )
+                        )
                     elif "messages" in data:
-                        requests.append(CountRequest(
-                            model=data.get("model", "gpt-4o-mini"),
-                            messages=data["messages"],
-                            provider=data.get("provider"),
-                            tools=data.get("tools"),
-                        ))
+                        requests.append(
+                            CountRequest(
+                                model=data.get("model", "gpt-4o-mini"),
+                                messages=data["messages"],
+                                provider=data.get("provider"),
+                                tools=data.get("tools"),
+                            )
+                        )
 
         if not requests:
             console.print("[red]Error: No valid requests found[/red]")
@@ -223,12 +230,7 @@ def count_batch(
                 results_table.add_column("Method", style="yellow")
 
                 for i, result in enumerate(batch_result.results):
-                    results_table.add_row(
-                        str(i),
-                        result.model,
-                        str(result.total_tokens),
-                        result.method
-                    )
+                    results_table.add_row(str(i), result.model, str(result.total_tokens), result.method)
                 console.print(results_table)
 
             if batch_result.errors:
@@ -238,11 +240,7 @@ def count_batch(
                 errors_table.add_column("Error", style="red")
 
                 for i, error in enumerate(batch_result.errors):
-                    errors_table.add_row(
-                        str(i),
-                        error.get("model", "unknown"),
-                        error.get("error", "unknown")
-                    )
+                    errors_table.add_row(str(i), error.get("model", "unknown"), error.get("error", "unknown"))
                 console.print(errors_table)
 
     asyncio.run(_run())

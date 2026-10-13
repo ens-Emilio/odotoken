@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import pytest
 
-from odotoken.services.model_catalog import ModelCatalog
 from odotoken.domain.errors import ModelNotSupportedError
+from odotoken.services.model_catalog import ModelCatalog
 
 
 class TestModelCatalog:

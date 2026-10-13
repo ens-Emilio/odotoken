@@ -81,7 +81,10 @@ class TestHeuristicAdapter:
             model="gpt-4o-mini",
             text="What's the weather?",
             tools=[
-                {"type": "function", "function": {"name": "get_weather", "description": "Get weather", "parameters": {}}}
+                {
+                    "type": "function",
+                    "function": {"name": "get_weather", "description": "Get weather", "parameters": {}},
+                }
             ],
         )
         result = await heuristic_adapter.count(request, model_info)

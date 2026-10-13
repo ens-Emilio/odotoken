@@ -2,17 +2,14 @@
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
-from typing import Any, Optional
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from odotoken.db import Database
 from odotoken.guard import Guard
-
 
 DASHBOARD_HTML = """<!DOCTYPE html>
 <html lang="en">
@@ -361,7 +358,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
 """
 
 
-def register_dashboard_routes(app: FastAPI, db: Database, guard: Optional[Guard] = None) -> None:
+def register_dashboard_routes(app: FastAPI, db: Database, guard: Guard | None = None) -> None:
     # Serve the built React dashboard (frontend/ → pnpm build → src/odotoken/static)
     static_dir = Path(__file__).parent / "static"
     if (static_dir / "index.html").exists():
@@ -376,7 +373,7 @@ def register_dashboard_routes(app: FastAPI, db: Database, guard: Optional[Guard]
             return FileResponse(str(static_dir / "index.html"))
 
     @app.get("/api/stats")
-    async def stats_api(since: Optional[str] = None):
+    async def stats_api(since: str | None = None):
         summary = db.get_summary(since=since)
         by_model = db.get_summary_by_model(since=since)
         by_client = db.get_summary_by_client(since=since)
@@ -405,14 +402,21 @@ def register_dashboard_routes(app: FastAPI, db: Database, guard: Optional[Guard]
                 },
             }
 
-        return JSONResponse({
-            "summary": summary,
-            "by_model": by_model,
-            "by_client": by_client,
-            "recent_events": recent_events,
-            "daily": daily,
-            "guard": guard_info,
-        })
+        # Drop noise rows (no model name and no usage: favicon 404s, failed
+        # connections) so dashboard tables stay clean.
+        by_model = [m for m in by_model if m.get("model") or m.get("total_tokens")]
+        by_client = [c for c in by_client if c.get("total_tokens") or c.get("requests")]
+
+        return JSONResponse(
+            {
+                "summary": summary,
+                "by_model": by_model,
+                "by_client": by_client,
+                "recent_events": recent_events,
+                "daily": daily,
+                "guard": guard_info,
+            }
+        )
 
     # Move catch-all wildcard routes to the end so /dashboard and /api/stats are matched first
     app.router.routes.sort(key=lambda r: 1 if "{" in getattr(r, "path", "") else 0)

@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
+
 from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel
 
 from odotoken.infra.logging import get_metrics
 from odotoken.services.token_counter import TokenCounter
-
 
 router = APIRouter(tags=["health"])
 
@@ -38,7 +38,7 @@ def get_token_counter(request: Request) -> TokenCounter:
 async def health_check() -> HealthResponse:
     """Liveness probe - service is running."""
     return HealthResponse(
-        timestamp=datetime.now(timezone.utc).isoformat(),
+        timestamp=datetime.now(UTC).isoformat(),
     )
 
 

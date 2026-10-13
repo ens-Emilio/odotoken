@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 import hashlib
 import time
 from collections import OrderedDict
@@ -76,10 +77,8 @@ class TokenCache:
         # Move to end (LRU)
         self._cache.move_to_end(key)
 
-        # Mark as cache hit
-        result = entry.result
-        result.cache_hit = True
-        return result
+        # Return a copy flagged as a cache hit — never mutate the stored object
+        return dataclasses.replace(entry.result, cache_hit=True)
 
     def set(self, request: CountRequest, model_info: ModelInfo, result: CountResult) -> None:
         if not self.config.cache_enabled:

@@ -8,11 +8,11 @@ import typer
 from rich.console import Console
 from rich.table import Table
 
+from odotoken.domain.errors import ModelNotSupportedError
 from odotoken.infra.config import get_token_counter_config, load_config
+from odotoken.services.cache import TokenCache
 from odotoken.services.model_catalog import ModelCatalog
 from odotoken.services.token_counter import TokenCounter
-from odotoken.services.cache import TokenCache
-from odotoken.domain.errors import ModelNotSupportedError
 
 console = Console()
 models_app = typer.Typer(name="models", help="List and manage models")
@@ -35,6 +35,7 @@ def list_models(
     output: str = typer.Option("table", "--output", "-o", help="Output format: table, json"),
 ) -> None:
     """List all supported models."""
+
     async def _run():
         counter = await _get_token_counter()
 
@@ -84,14 +85,15 @@ def model_info(
     model_id: str = typer.Argument(..., help="Model identifier"),
 ) -> None:
     """Get detailed information about a specific model."""
+
     async def _run():
         counter = await _get_token_counter()
 
         try:
             m = counter.get_model_info(model_id)
-        except ModelNotSupportedError:
+        except ModelNotSupportedError as e:
             console.print(f"[red]Model not found: {model_id}[/red]")
-            raise typer.Exit(1)
+            raise typer.Exit(1) from e
 
         table = Table(title=f"Model Info: {model_id}")
         table.add_column("Property", style="cyan")

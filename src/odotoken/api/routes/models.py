@@ -7,7 +7,6 @@ from pydantic import BaseModel
 
 from odotoken.services.token_counter import TokenCounter
 
-
 router = APIRouter(prefix="/v1", tags=["models"])
 
 
@@ -82,8 +81,8 @@ async def get_model(
     """Get detailed information about a specific model."""
     try:
         m = token_counter.get_model_info(model_id)
-    except Exception:
-        raise HTTPException(status_code=404, detail=f"Model not found: {model_id}")
+    except Exception as e:
+        raise HTTPException(status_code=404, detail=f"Model not found: {model_id}") from e
 
     return ModelInfoResponse(
         id=m.id,

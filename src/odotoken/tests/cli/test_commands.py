@@ -4,10 +4,8 @@ from __future__ import annotations
 
 import json
 import os
-import sys
 import subprocess
-import pytest
-
+import sys
 
 # Get the odotoken executable from the same Python environment
 ODOTOKEN_CMD = os.path.join(os.path.dirname(sys.executable), "odotoken")
@@ -15,7 +13,7 @@ ODOTOKEN_CMD = os.path.join(os.path.dirname(sys.executable), "odotoken")
 
 def run_cli(args: list[str], input_text: str | None = None) -> subprocess.CompletedProcess:
     """Run CLI command and return result."""
-    cmd = [ODOTOKEN_CMD] + args
+    cmd = [ODOTOKEN_CMD, *args]
     return subprocess.run(
         cmd,
         capture_output=True,
@@ -67,7 +65,10 @@ class TestCLICommands:
 
     def test_count_chat_json(self):
         messages = '[{"role": "user", "content": "Hello"}]'
-        result = run_cli(["count", "chat", "--model", "gpt-4o-mini", "--file", "-", "--output", "json"], input_text=messages)
+        result = run_cli(
+            ["count", "chat", "--model", "gpt-4o-mini", "--file", "-", "--output", "json"],
+            input_text=messages,
+        )
         assert result.returncode == 0
         data = json.loads(result.stdout.strip())
         assert data["total_tokens"] > 0
@@ -101,7 +102,9 @@ class TestCLICommands:
 
     def test_count_batch(self, tmp_path):
         batch_file = tmp_path / "batch.jsonl"
-        batch_file.write_text('{"model": "gpt-4o-mini", "text": "Test 1"}\n{"model": "gpt-4o-mini", "text": "Test 2"}')
+        batch_file.write_text(
+            '{"model": "gpt-4o-mini", "text": "Test 1"}\n{"model": "gpt-4o-mini", "text": "Test 2"}'
+        )
 
         result = run_cli(["count", "batch", str(batch_file)])
         assert result.returncode == 0

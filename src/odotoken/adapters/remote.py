@@ -2,12 +2,18 @@
 
 from __future__ import annotations
 
-import httpx
 from typing import Any
+
+import httpx
 
 from odotoken.adapters.base import BaseAdapter
 from odotoken.domain.entities import CountRequest, CountResult, ModelInfo
-from odotoken.domain.errors import ProviderError, ProviderTimeoutError, ProviderNotConfiguredError, TokenCountError
+from odotoken.domain.errors import (
+    ProviderError,
+    ProviderNotConfiguredError,
+    ProviderTimeoutError,
+    TokenCountError,
+)
 from odotoken.infra.config import ProviderConfig
 from odotoken.infra.logging import get_logger, measure_time
 
@@ -64,6 +70,7 @@ class RemoteAdapterBase(BaseAdapter):
                 if response.status_code == 429:
                     retry_after = float(response.headers.get("Retry-After", 1))
                     import asyncio
+
                     await asyncio.sleep(retry_after)
                     continue
 
@@ -102,6 +109,7 @@ class OpenAITokenAdapter(RemoteAdapterBase):
 
     async def count(self, request: CountRequest, model_info: ModelInfo) -> CountResult:
         import time
+
         start = time.perf_counter()
 
         payload = {
@@ -156,6 +164,7 @@ class AnthropicTokenAdapter(RemoteAdapterBase):
 
     async def count(self, request: CountRequest, model_info: ModelInfo) -> CountResult:
         import time
+
         start = time.perf_counter()
 
         payload: dict[str, Any] = {"model": request.model}
@@ -208,6 +217,7 @@ class GeminiTokenAdapter(RemoteAdapterBase):
 
     async def count(self, request: CountRequest, model_info: ModelInfo) -> CountResult:
         import time
+
         start = time.perf_counter()
 
         payload: dict[str, Any] = {
@@ -226,7 +236,8 @@ class GeminiTokenAdapter(RemoteAdapterBase):
         else:
             raise TokenCountError("Either text or messages required for Gemini token counting")
 
-        url = f"{self.config.base_url.rstrip('/')}{self.config.count_endpoint.replace('{model}', request.model)}"
+        endpoint = self.config.count_endpoint.replace("{model}", request.model)
+        url = f"{self.config.base_url.rstrip('/')}{endpoint}"
         response = await self._post(url, payload)
 
         total = response.get("totalTokens", 0)
@@ -248,7 +259,7 @@ class GeminiTokenAdapter(RemoteAdapterBase):
         )
 
 
-async def create_remote_adapters(provider_configs: dict[str, ProviderConfig]) -> list[BaseAdapter]:
+def create_remote_adapters(provider_configs: dict[str, ProviderConfig]) -> list[BaseAdapter]:
     """Factory to create remote adapters from config."""
     adapters = []
 

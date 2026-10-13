@@ -9,6 +9,7 @@ from typing import Any
 @dataclass
 class CountRequest:
     """Request to count tokens."""
+
     model: str
     text: str | None = None
     messages: list[dict[str, Any]] | None = None
@@ -20,6 +21,7 @@ class CountRequest:
 @dataclass
 class CountResult:
     """Result of token counting."""
+
     request_id: str | None = None
     model: str = ""
     resolved_model: str = ""
@@ -44,6 +46,7 @@ class CountResult:
 @dataclass
 class BatchCountResult:
     """Result of batch token counting."""
+
     total_items: int = 0
     successful_items: int = 0
     failed_items: int = 0
@@ -56,6 +59,7 @@ class BatchCountResult:
 @dataclass
 class ModelInfo:
     """Information about a model."""
+
     id: str
     aliases: list[str] = field(default_factory=list)
     provider: str = ""

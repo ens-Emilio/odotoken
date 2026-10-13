@@ -204,6 +204,8 @@ journalctl --user -u odotoken -n 50 --no-pager
 
 ## Security notes
 
+- **Single process only** — SQLite + the in-memory cache assume one worker. Run `odotoken start` without `--workers` (default 1); multi-worker would split metering across processes with no shared state.
+
 - The proxy binds to `127.0.0.1` by default — local only
 - API keys pass through in headers; **nothing is logged or stored** — only token counts, model names, client app name (from User-Agent), cost and latency
 - Put it behind auth/reverse-proxy before exposing on a network

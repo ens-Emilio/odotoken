@@ -30,6 +30,7 @@ class HeuristicAdapter(BaseAdapter):
     async def count(self, request: CountRequest, model_info: ModelInfo) -> CountResult:
         with measure_time("token_counter.heuristic.duration_ms"):
             import time
+
             start = time.perf_counter()
 
             total_chars = 0

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+
 import pytest
 
 from odotoken.adapters.heuristic import HeuristicAdapter
@@ -34,7 +35,7 @@ def model_info():
 
 @pytest.fixture
 def golden_cases():
-    with open("src/odotoken/tests/fixtures/golden_counts.json", "r") as f:
+    with open("src/odotoken/tests/fixtures/golden_counts.json") as f:
         return json.load(f)["test_cases"]
 
 
@@ -58,8 +59,7 @@ class TestGoldenCounts:
             actual = result.total_tokens
 
             assert abs(actual - expected) <= tolerance, (
-                f"Golden test failed for '{case['name']}': "
-                f"expected {expected}±{tolerance}, got {actual}"
+                f"Golden test failed for '{case['name']}': expected {expected}±{tolerance}, got {actual}"
             )
 
             # Verify method is as expected

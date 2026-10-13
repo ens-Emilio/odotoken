@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import pytest
 
 from odotoken.domain.entities import CountRequest, CountResult, ModelInfo
@@ -97,14 +96,18 @@ class TestTokenCache:
         req1 = CountRequest(model="gpt-4o-mini", text="Hello")
         req2 = CountRequest(model="gpt-4o", text="Hello")
 
-        model1 = ModelInfo(id="gpt-4o-mini", provider="openai", context_window=128000, counting_method="heuristic")
+        model1 = ModelInfo(
+            id="gpt-4o-mini", provider="openai", context_window=128000, counting_method="heuristic"
+        )
         model2 = ModelInfo(id="gpt-4o", provider="openai", context_window=128000, counting_method="heuristic")
 
         token_cache.set(req1, model1, sample_result)
         cached = token_cache.get(req2, model2)
         assert cached is None
 
-    def test_cache_invalidation_on_catalog_version(self, token_cache, sample_request, model_info, sample_result):
+    def test_cache_invalidation_on_catalog_version(
+        self, token_cache, sample_request, model_info, sample_result
+    ):
         token_cache.set_catalog_version("v1")
         token_cache.set(sample_request, model_info, sample_result)
 
@@ -116,7 +119,9 @@ class TestTokenCache:
         cached = token_cache.get(sample_request, model_info)
         assert cached is None
 
-    def test_cache_invalidation_on_tokenizer_version(self, token_cache, sample_request, model_info, sample_result):
+    def test_cache_invalidation_on_tokenizer_version(
+        self, token_cache, sample_request, model_info, sample_result
+    ):
         token_cache.set_tokenizer_version("heuristic", "v1")
         token_cache.set(sample_request, model_info, sample_result)
 

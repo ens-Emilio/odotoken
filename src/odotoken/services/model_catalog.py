@@ -27,7 +27,7 @@ class ModelCatalog:
             logger.warning("Model catalog not found at %s", self.catalog_path)
             return
 
-        with open(self.catalog_path, "r", encoding="utf-8") as f:
+        with open(self.catalog_path, encoding="utf-8") as f:
             data = json.load(f)
 
         self._version = data.get("version", "unknown")

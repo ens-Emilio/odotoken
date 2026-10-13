@@ -13,15 +13,14 @@ import typer
 from rich.console import Console
 from rich.table import Table
 
-from odotoken.api.app import create_app
 from odotoken.cli.commands.count import get_count_app
 from odotoken.cli.commands.models import get_models_app
 from odotoken.dashboard import register_dashboard_routes
 from odotoken.db import Database
 from odotoken.guard import Guard, GuardLimits
 from odotoken.infra.config import get_token_counter_config
-from odotoken.proxy import create_proxy_app
 from odotoken.pricing import PricingCalculator
+from odotoken.proxy import create_proxy_app
 
 app = typer.Typer(
     name="odotoken",
@@ -41,7 +40,7 @@ DEFAULT_DB_PATH = Path("odotoken.db")
 def load_config_file(path: Path = DEFAULT_CONFIG_PATH) -> dict:
     if path.exists():
         try:
-            with open(path, "r", encoding="utf-8") as f:
+            with open(path, encoding="utf-8") as f:
                 return json.load(f)
         except Exception as e:
             console.print(f"[yellow]Warning: Failed to load config from {path}: {e}[/yellow]")
@@ -81,9 +80,19 @@ def start(
     proxy_app = create_proxy_app(database, PricingCalculator(cfg.get("prices", "prices.json")), guard, cfg)
     register_dashboard_routes(proxy_app, database, guard)
 
+    # Token counting routes (/v1/count, /v1/count/batch, /v1/models) live on
+    # the same app when token_counter is enabled — no separate service needed.
+    if get_token_counter_config(cfg).enabled:
+        from odotoken.api.app import attach_token_counter_routes
+
+        attach_token_counter_routes(proxy_app, cfg)
+        console.print("[green]Token counter enabled: /v1/count, /v1/models[/green]")
+
     console.print(f"[green]Starting odotoken proxy on {actual_host}:{actual_port}[/green]")
     console.print(f"[green]Dashboard: http://{actual_host}:{actual_port}/dashboard[/green]")
-    uvicorn.run(proxy_app, host=actual_host, port=actual_port, workers=workers, reload=reload, log_level="info")
+    uvicorn.run(
+        proxy_app, host=actual_host, port=actual_port, workers=workers, reload=reload, log_level="info"
+    )
 
 
 @app.command()
@@ -93,31 +102,16 @@ def serve(
     config_path: str = typer.Option("config.json", "--config", "-c", help="Config file path"),
     reload: bool = typer.Option(False, "--reload", help="Enable auto-reload"),
 ):
-    """Start the token counter API server."""
-    import uvicorn
-
-    config_file = Path(config_path)
-    if not config_file.exists():
-        console.print(f"[bold red]Config file not found: {config_file}[/bold red]")
-        raise typer.Exit(1)
-
-    cfg = load_config_file(config_file)
-    tc_config = get_token_counter_config(cfg)
-
-    if not tc_config.enabled:
-        console.print("[yellow]Token counter is disabled in config. Enable it to use this command.[/yellow]")
-        raise typer.Exit(1)
-
-    console.print(f"[green]Starting token counter API on {host}:{port}[/green]")
-
-    api_app = create_app(config_path)
-    uvicorn.run(api_app, host=host, port=port, reload=reload, log_level="info")
+    """Start the proxy (kept as an alias of `start` — token counting routes
+    live on the same app under /v1/count when token_counter.enabled is true)."""
+    start(host=host, port=port, config_path=config_path, reload=reload)
 
 
 @app.command()
 def stop():
     """Stop the running background daemon."""
     import signal
+
     pid_file = Path("/tmp/odotoken.pid")
     if not pid_file.exists():
         console.print("[yellow]No PID file found. Is odotoken running?[/yellow]")
@@ -147,7 +141,9 @@ def status():
         if exec_match:
             exec_bin = exec_match.group(1)
             if not Path(exec_bin).exists():
-                console.print(f"[bold red]unit ExecStart points to {exec_bin}, which does not exist.[/bold red]")
+                console.print(
+                    f"[bold red]unit ExecStart points to {exec_bin}, which does not exist.[/bold red]"
+                )
                 console.print("run: [green]odotoken install-service[/green] from the project directory")
             else:
                 console.print(f"[green]unit ok: {exec_bin}[/green]")
@@ -176,7 +172,10 @@ def install_service(
     bin_path = project_dir / ".venv/bin/odotoken"
     if not bin_path.exists():
         console.print(f"[red]no odotoken binary at {bin_path}[/red]")
-        console.print("run [green]python -m venv .venv && .venv/bin/pip install -e .[/green] first, from the project root")
+        console.print(
+            "run [green]python -m venv .venv && .venv/bin/pip install -e .[/green]"
+            " first, from the project root"
+        )
         raise typer.Exit(1)
 
     unit = f"""[Unit]
@@ -201,7 +200,9 @@ WantedBy=default.target
     console.print(f"[green]wrote {unit_path}[/green]")
     console.print(f"  WorkingDirectory={project_dir}")
     console.print(f"  ExecStart={bin_path} start --host 127.0.0.1 --port {actual_port}")
-    console.print("now run: [green]systemctl --user daemon-reload && systemctl --user enable --now odotoken[/green]")
+    console.print(
+        "now run: [green]systemctl --user daemon-reload && systemctl --user enable --now odotoken[/green]"
+    )
 
 
 @app.command()
@@ -245,7 +246,12 @@ def stats(
         table.add_column("Total Tokens", justify="right")
         table.add_column("Cost (USD)", justify="right")
         for row in results:
-            table.add_row(row["client_app"], str(row["request_count"]), f"{row['total_tokens']:,}", f"${row['total_cost_usd']:.6f}")
+            table.add_row(
+                row["client_app"],
+                str(row["request_count"]),
+                f"{row['total_tokens']:,}",
+                f"${row['total_cost_usd']:.6f}",
+            )
         console.print(table)
         return
 
@@ -269,7 +275,12 @@ def stats(
             day_table.add_column("Tokens", justify="right")
             day_table.add_column("Cost (USD)", justify="right")
             for row in daily:
-                day_table.add_row(row["date"], str(row["request_count"]), f"{row['total_tokens']:,}", f"${row['total_cost_usd']:.6f}")
+                day_table.add_row(
+                    row["date"],
+                    str(row["request_count"]),
+                    f"{row['total_tokens']:,}",
+                    f"${row['total_cost_usd']:.6f}",
+                )
             console.print(day_table)
 
 

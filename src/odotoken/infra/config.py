@@ -44,7 +44,7 @@ def load_config(path: str | Path = "config.json") -> dict[str, Any]:
     """Load configuration from JSON file with environment variable overrides."""
     config_path = Path(path)
     if config_path.exists():
-        with open(config_path, "r", encoding="utf-8") as f:
+        with open(config_path, encoding="utf-8") as f:
             config = json.load(f)
     else:
         config = {}
@@ -53,7 +53,7 @@ def load_config(path: str | Path = "config.json") -> dict[str, Any]:
     token_counter = config.get("token_counter", {})
     providers = token_counter.get("providers", {})
 
-    for provider_name, provider_config in providers.items():
+    for provider_config in providers.values():
         api_key_env = provider_config.get("api_key_env")
         if api_key_env and api_key_env in os.environ:
             provider_config["api_key"] = os.environ[api_key_env]

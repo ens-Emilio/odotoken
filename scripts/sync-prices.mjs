@@ -13,7 +13,7 @@
  *
  * Usage: node scripts/sync-prices.mjs [--output prices.json]
  */
-import { readFileSync, writeFileSync } from 'fs';
+import { readFileSync, writeFileSync, statSync } from 'fs';
 import { homedir } from 'os';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
@@ -67,6 +67,21 @@ async function main() {
     prices = JSON.parse(readFileSync(outputPath, 'utf8'));
   } catch {
     // start fresh
+  }
+
+  // 24h freshness cache: skip the network fetch when prices were synced
+  // recently (--force overrides).
+  if (!process.argv.includes('--force')) {
+    try {
+      const { mtimeMs } = statSync(outputPath);
+      const ageH = (Date.now() - mtimeMs) / 3_600_000;
+      if (ageH < 24) {
+        console.log(`prices.json synced ${ageH.toFixed(1)}h ago — use --force to refresh`);
+        process.exit(0);
+      }
+    } catch {
+      // no file yet, proceed
+    }
   }
   const overridden = new Set(
     Object.entries(prices)

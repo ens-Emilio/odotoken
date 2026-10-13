@@ -8,13 +8,14 @@ import sys
 import time
 from contextlib import contextmanager
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 
 @dataclass
 class MetricsCollector:
     """Simple in-memory metrics collector."""
+
     counters: dict[str, int] = field(default_factory=dict)
     histograms: dict[str, list[float]] = field(default_factory=dict)
     gauges: dict[str, float] = field(default_factory=dict)
@@ -42,7 +43,10 @@ class MetricsCollector:
     def get_metrics(self) -> dict[str, Any]:
         return {
             "counters": self.counters,
-            "histograms": {k: {"count": len(v), "sum": sum(v), "min": min(v), "max": max(v)} for k, v in self.histograms.items()},
+            "histograms": {
+                k: {"count": len(v), "sum": sum(v), "min": min(v), "max": max(v)}
+                for k, v in self.histograms.items()
+            },
             "gauges": self.gauges,
         }
 
@@ -73,8 +77,7 @@ def setup_logging(level: str = "INFO", json_format: bool = False) -> None:
         formatter = JsonFormatter()
     else:
         formatter = logging.Formatter(
-            "%(asctime)s | %(levelname)-8s | %(name)s | %(message)s",
-            datefmt="%Y-%m-%d %H:%M:%S"
+            "%(asctime)s | %(levelname)-8s | %(name)s | %(message)s", datefmt="%Y-%m-%d %H:%M:%S"
         )
 
     handler = logging.StreamHandler(sys.stdout)
@@ -95,22 +98,36 @@ class JsonFormatter(logging.Formatter):
 
     def format(self, record: logging.LogRecord) -> str:
         log_data = {
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
             "level": record.levelname,
             "logger": record.name,
             "message": record.getMessage(),
         }
 
-        # Add extra fields
-        for key, value in record.__dict__.items():
-            if key not in {
-                "name", "msg", "args", "created", "filename", "funcName",
-                "levelname", "levelno", "lineno", "module", "msecs",
-                "message", "pathname", "process", "processName",
-                "relativeCreated", "thread", "threadName", "exc_info",
-                "exc_text", "stack_info"
-            }:
-                log_data[key] = value
+        reserved = {
+            "name",
+            "msg",
+            "args",
+            "created",
+            "filename",
+            "funcName",
+            "levelname",
+            "levelno",
+            "lineno",
+            "module",
+            "msecs",
+            "message",
+            "pathname",
+            "process",
+            "processName",
+            "relativeCreated",
+            "thread",
+            "threadName",
+            "exc_info",
+            "exc_text",
+            "stack_info",
+        }
+        log_data.update({key: value for key, value in record.__dict__.items() if key not in reserved})
 
         if record.exc_info:
             log_data["exception"] = self.formatException(record.exc_info)

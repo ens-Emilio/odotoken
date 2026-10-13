@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from typing import Optional
+from datetime import UTC
 
 from odotoken.db import Database
 
@@ -15,10 +15,10 @@ logger = logging.getLogger("odotoken.guard")
 
 @dataclass
 class GuardLimits:
-    daily_cost_limit_usd: Optional[float] = None
-    monthly_cost_limit_usd: Optional[float] = None
-    daily_tokens_limit: Optional[int] = None
-    monthly_tokens_limit: Optional[int] = None
+    daily_cost_limit_usd: float | None = None
+    monthly_cost_limit_usd: float | None = None
+    daily_tokens_limit: int | None = None
+    monthly_tokens_limit: int | None = None
     action_on_breach: str = "alert"  # "alert" or "block"
 
 
@@ -34,7 +34,7 @@ class GuardCheckResult:
 
 
 class Guard:
-    def __init__(self, db: Database, limits: Optional[GuardLimits] = None):
+    def __init__(self, db: Database, limits: GuardLimits | None = None):
         self.db = db
         self.limits = limits or GuardLimits()
 
@@ -46,8 +46,9 @@ class Guard:
         res = GuardCheckResult(allowed=True, status="ok")
 
         # ISO beginning of today (UTC)
-        from datetime import datetime, timezone
-        now = datetime.now(timezone.utc)
+        from datetime import datetime
+
+        now = datetime.now(UTC)
         today_start = f"{now.strftime('%Y-%m-%d')}T00:00:00"
         month_start = f"{now.strftime('%Y-%m')}-01T00:00:00"
 
@@ -61,7 +62,10 @@ class Guard:
 
         # Check daily cost
         if self.limits.daily_cost_limit_usd and res.current_daily_cost >= self.limits.daily_cost_limit_usd:
-            msg = f"Daily budget limit breached: ${res.current_daily_cost:.2f} >= ${self.limits.daily_cost_limit_usd:.2f}"
+            msg = (
+                f"Daily budget limit breached: ${res.current_daily_cost:.2f} "
+                f">= ${self.limits.daily_cost_limit_usd:.2f}"
+            )
             if self.limits.action_on_breach == "block":
                 res.allowed = False
                 res.status = "breached"
@@ -72,8 +76,14 @@ class Guard:
                 res.reason = msg
 
         # Check monthly cost
-        if self.limits.monthly_cost_limit_usd and res.current_monthly_cost >= self.limits.monthly_cost_limit_usd:
-            msg = f"Monthly budget limit breached: ${res.current_monthly_cost:.2f} >= ${self.limits.monthly_cost_limit_usd:.2f}"
+        if (
+            self.limits.monthly_cost_limit_usd
+            and res.current_monthly_cost >= self.limits.monthly_cost_limit_usd
+        ):
+            msg = (
+                f"Monthly budget limit breached: ${res.current_monthly_cost:.2f} "
+                f">= ${self.limits.monthly_cost_limit_usd:.2f}"
+            )
             if self.limits.action_on_breach == "block":
                 res.allowed = False
                 res.status = "breached"
@@ -85,7 +95,9 @@ class Guard:
 
         # Check daily tokens
         if self.limits.daily_tokens_limit and res.current_daily_tokens >= self.limits.daily_tokens_limit:
-            msg = f"Daily token limit breached: {res.current_daily_tokens} >= {self.limits.daily_tokens_limit}"
+            msg = (
+                f"Daily token limit breached: {res.current_daily_tokens} >= {self.limits.daily_tokens_limit}"
+            )
             if self.limits.action_on_breach == "block":
                 res.allowed = False
                 res.status = "breached"

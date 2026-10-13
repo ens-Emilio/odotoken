@@ -1,12 +1,18 @@
 """Main token counting service orchestrating adapters, cache, and catalog."""
 
 from __future__ import annotations
+
 import asyncio
 
 from odotoken.adapters.base import TokenCountAdapter
 from odotoken.adapters.heuristic import HeuristicAdapter
 from odotoken.adapters.remote import create_remote_adapters
-from odotoken.domain.entities import CountRequest, CountResult, BatchCountResult, ModelInfo
+from odotoken.domain.entities import (
+    BatchCountResult,
+    CountRequest,
+    CountResult,
+    ModelInfo,
+)
 from odotoken.domain.errors import TokenCountError
 from odotoken.infra.config import TokenCounterConfig
 from odotoken.infra.logging import get_logger, get_metrics, measure_time
@@ -33,28 +39,13 @@ class TokenCounter:
         # Register built-in heuristic adapter
         self._adapters.append(HeuristicAdapter(config.heuristic))
 
-        # Register remote adapters from config
-        self._register_remote_adapters()
+        # Register remote adapters from config (pure constructor calls — no I/O)
+        for adapter in create_remote_adapters(self.config.providers):
+            self._adapters.append(adapter)
+            logger.info("Registered remote adapter: %s", adapter.name)
 
         # Update cache versions
         self.cache.set_catalog_version(catalog.version)
-
-    def _register_remote_adapters(self) -> None:
-        """Create and register remote adapters from provider configs."""
-
-        async def _create():
-            adapters = await create_remote_adapters(self.config.providers)
-            for adapter in adapters:
-                self._adapters.append(adapter)
-                logger.info("Registered remote adapter: %s", adapter.name)
-
-        try:
-            asyncio.get_running_loop()
-            # If we're in an async context, schedule
-            asyncio.create_task(_create())
-        except RuntimeError:
-            # No running loop, run synchronously
-            asyncio.run(_create())
 
     def register_adapter(self, adapter: TokenCountAdapter) -> None:
         """Register a new adapter (e.g., remote, local tokenizer)."""
@@ -124,8 +115,6 @@ class TokenCounter:
     @measure_time("token_counter.count_batch.duration_ms")
     async def count_batch(self, requests: list[CountRequest]) -> BatchCountResult:
         """Count tokens for multiple requests concurrently."""
-        import asyncio
-
         metrics = get_metrics()
         metrics.increment("token_counter.batch.requests")
 
@@ -176,7 +165,7 @@ class TokenCounter:
                             total_chars += len(part.get("text", ""))
 
         if total_chars > self.config.max_request_tokens * 4:  # rough chars-to-tokens
-            raise TokenCountError(f"Request too large: ~{total_chars//4} tokens estimated")
+            raise TokenCountError(f"Request too large: ~{total_chars // 4} tokens estimated")
 
     def get_model_info(self, model: str) -> ModelInfo:
         """Get model information."""

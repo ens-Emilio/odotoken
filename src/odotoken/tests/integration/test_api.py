@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 import pytest_asyncio
-from httpx import AsyncClient, ASGITransport
+from httpx import ASGITransport, AsyncClient
 
 from odotoken.api.app import create_app
 

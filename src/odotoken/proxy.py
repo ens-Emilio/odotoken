@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
-from contextlib import asynccontextmanager
+import asyncio
 import json
 import logging
 import time
+from contextlib import asynccontextmanager
 from typing import Any
 from urllib.parse import urljoin
 
@@ -37,12 +38,15 @@ def create_proxy_app(
 
     app = FastAPI(title="odotoken - AI Token Proxy", version="0.1.0", lifespan=lifespan)
 
-    providers_config = config.get("providers", {
-        "anthropic": {"upstream_url": "https://api.anthropic.com"},
-        "openai": {"upstream_url": "https://api.openai.com"},
-        "gemini": {"upstream_url": "https://generativelanguage.googleapis.com"},
-        "ollama": {"upstream_url": "http://localhost:11434"},
-    })
+    providers_config = config.get(
+        "providers",
+        {
+            "anthropic": {"upstream_url": "https://api.anthropic.com"},
+            "openai": {"upstream_url": "https://api.openai.com"},
+            "gemini": {"upstream_url": "https://generativelanguage.googleapis.com"},
+            "ollama": {"upstream_url": "http://localhost:11434"},
+        },
+    )
 
     def determine_upstream(path: str, headers: dict[str, str]) -> tuple[str, str]:
         """Returns (provider_name, target_base_url)."""
@@ -62,7 +66,7 @@ def create_proxy_app(
         """Strip provider prefix if present, e.g. /anthropic/v1/messages -> /v1/messages."""
         prefix = f"/{provider}"
         if path.startswith(prefix):
-            stripped = path[len(prefix):]
+            stripped = path[len(prefix) :]
             return stripped if stripped.startswith("/") else f"/{stripped}"
         return path
 
@@ -158,7 +162,8 @@ def create_proxy_app(
                         cache_read_tokens=usage.cache_read_tokens,
                         cache_write_tokens=usage.cache_write_tokens,
                     )
-                    db.record_event(
+                    await asyncio.to_thread(
+                        db.record_event,
                         TokenEvent(
                             provider=provider,
                             model=usage.model,
@@ -171,7 +176,7 @@ def create_proxy_app(
                             cost_usd=cost,
                             latency_ms=round(latency_ms, 2),
                             status_code=response.status_code,
-                        )
+                        ),
                     )
 
             return StreamingResponse(
@@ -214,21 +219,28 @@ def create_proxy_app(
                 cache_write_tokens=cache_write,
             )
 
-            db.record_event(
-                TokenEvent(
-                    provider=provider,
-                    model=model_name,
-                    client_app=client_app,
-                    prompt_tokens=prompt_tokens,
-                    completion_tokens=completion_tokens,
-                    total_tokens=prompt_tokens + completion_tokens,
-                    cache_read_tokens=cache_read,
-                    cache_write_tokens=cache_write,
-                    cost_usd=cost,
-                    latency_ms=round(latency_ms, 2),
-                    status_code=response.status_code,
+            # Don't log metering noise: 404s from the catch-all (favicon, stale
+            # assets) carry no usage data and pollute the dashboard.
+            has_usage = prompt_tokens or completion_tokens
+            if has_usage or response.status_code not in (404, 405):
+                await asyncio.to_thread(
+                    db.record_event,
+                    TokenEvent(
+                        provider=provider,
+                        model=model_name,
+                        client_app=client_app,
+                        prompt_tokens=prompt_tokens,
+                        completion_tokens=completion_tokens,
+                        total_tokens=prompt_tokens + completion_tokens,
+                        cache_read_tokens=cache_read,
+                        cache_write_tokens=cache_write,
+                        cost_usd=cost,
+                        latency_ms=round(latency_ms, 2),
+                        status_code=response.status_code,
+                    ),
                 )
-            )
+            else:
+                logger.debug("skipped event logging for %s %s", response.status_code, path)
 
             return JSONResponse(
                 content=res_json if res_json else None,

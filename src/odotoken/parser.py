@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from typing import Any, Optional
+from typing import Any
 
 
 @dataclass
@@ -143,9 +143,9 @@ class StreamUsageAccumulator:
                 current_event = ""
                 continue
             if line.startswith("event:"):
-                current_event = line[len("event:"):].strip()
+                current_event = line[len("event:") :].strip()
             elif line.startswith("data:"):
-                data_str = line[len("data:"):].strip()
+                data_str = line[len("data:") :].strip()
                 if data_str == "[DONE]":
                     continue
                 try:
@@ -172,7 +172,7 @@ class StreamUsageAccumulator:
                 self.completion_tokens = usage.get("output_tokens", self.completion_tokens)
 
         elif self.provider == "openai":
-            if "usage" in data and data["usage"]:
+            if data.get("usage"):
                 usage = data["usage"]
                 self.prompt_tokens = usage.get("prompt_tokens", self.prompt_tokens)
                 self.completion_tokens = usage.get("completion_tokens", self.completion_tokens)
@@ -192,10 +192,12 @@ class StreamUsageAccumulator:
         else:
             # Custom OpenAI-compatible providers: usage arrives in a final
             # chunk (often with empty choices) or alongside "type": "usage".
-            if "usage" in data and data["usage"]:
+            if data.get("usage"):
                 usage = data["usage"]
                 self.prompt_tokens = usage.get("prompt_tokens", usage.get("input_tokens", self.prompt_tokens))
-                self.completion_tokens = usage.get("completion_tokens", usage.get("output_tokens", self.completion_tokens))
+                self.completion_tokens = usage.get(
+                    "completion_tokens", usage.get("output_tokens", self.completion_tokens)
+                )
                 self.total_tokens = usage.get("total_tokens", self.total_tokens)
                 details = usage.get("prompt_tokens_details", {})
                 if isinstance(details, dict):

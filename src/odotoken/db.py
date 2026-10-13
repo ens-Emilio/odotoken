@@ -4,20 +4,20 @@ Stores token consumption events and provides aggregation queries.
 
 from __future__ import annotations
 
-import json
 import sqlite3
+from collections.abc import Generator
 from contextlib import contextmanager
 from dataclasses import asdict, dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Generator, Optional
+from typing import Any
 
 
 @dataclass
 class TokenEvent:
-    id: Optional[int] = None
+    id: int | None = None
     timestamp: str = ""  # ISO-8601 UTC
-    provider: str = ""   # "anthropic", "openai", "gemini", etc.
+    provider: str = ""  # "anthropic", "openai", "gemini", etc.
     model: str = ""
     client_app: str = "unknown"  # "pi-agent", "omp", "opencode", etc.
     prompt_tokens: int = 0
@@ -40,7 +40,7 @@ class Database:
         self._init_db()
 
     @contextmanager
-    def connection(self) -> Generator[sqlite3.Connection, None, None]:
+    def connection(self) -> Generator[sqlite3.Connection]:
         conn = sqlite3.connect(self.db_path, timeout=10.0)
         conn.row_factory = sqlite3.Row
         try:
@@ -74,20 +74,14 @@ class Database:
                 );
                 """
             )
-            conn.execute(
-                "CREATE INDEX IF NOT EXISTS idx_token_events_timestamp ON token_events(timestamp);"
-            )
-            conn.execute(
-                "CREATE INDEX IF NOT EXISTS idx_token_events_model ON token_events(model);"
-            )
-            conn.execute(
-                "CREATE INDEX IF NOT EXISTS idx_token_events_client ON token_events(client_app);"
-            )
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_token_events_timestamp ON token_events(timestamp);")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_token_events_model ON token_events(model);")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_token_events_client ON token_events(client_app);")
             conn.commit()
 
     def record_event(self, event: TokenEvent) -> int:
         if not event.timestamp:
-            event.timestamp = datetime.now(timezone.utc).isoformat()
+            event.timestamp = datetime.now(UTC).isoformat()
         if not event.total_tokens:
             event.total_tokens = event.prompt_tokens + event.completion_tokens
 
@@ -121,7 +115,7 @@ class Database:
             conn.commit()
             return cur.lastrowid or 0
 
-    def get_summary(self, since: Optional[str] = None) -> dict[str, Any]:
+    def get_summary(self, since: str | None = None) -> dict[str, Any]:
         """Aggregate totals across the board, optionally filtered by ISO date/timestamp 'since'."""
         query = """
             SELECT
@@ -146,7 +140,7 @@ class Database:
                 return {}
             return dict(row)
 
-    def get_summary_by_model(self, since: Optional[str] = None) -> list[dict[str, Any]]:
+    def get_summary_by_model(self, since: str | None = None) -> list[dict[str, Any]]:
         query = """
             SELECT
                 model,
@@ -170,7 +164,7 @@ class Database:
             rows = conn.execute(query, params).fetchall()
             return [dict(r) for r in rows]
 
-    def get_summary_by_client(self, since: Optional[str] = None) -> list[dict[str, Any]]:
+    def get_summary_by_client(self, since: str | None = None) -> list[dict[str, Any]]:
         query = """
             SELECT
                 client_app,

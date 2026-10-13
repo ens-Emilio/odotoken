@@ -9,7 +9,6 @@ from odotoken.domain.entities import CountRequest
 from odotoken.domain.errors import TokenCountError
 from odotoken.services.token_counter import TokenCounter
 
-
 router = APIRouter(prefix="/v1", tags=["token-counting"])
 
 
@@ -117,9 +116,9 @@ async def count_tokens(
         )
 
     except TokenCountError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=str(e)) from e
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Internal error: {e}")
+        raise HTTPException(status_code=500, detail=f"Internal error: {e}") from e
 
 
 @router.post("/count/batch", response_model=BatchCountResponse)
@@ -132,18 +131,22 @@ async def count_tokens_batch(
         domain_requests = []
         for item in request.items:
             if isinstance(item, CountTextRequest):
-                domain_requests.append(CountRequest(
-                    model=item.model,
-                    text=item.text,
-                    provider=item.provider,
-                ))
+                domain_requests.append(
+                    CountRequest(
+                        model=item.model,
+                        text=item.text,
+                        provider=item.provider,
+                    )
+                )
             else:
-                domain_requests.append(CountRequest(
-                    model=item.model,
-                    messages=item.messages,
-                    provider=item.provider,
-                    tools=item.tools,
-                ))
+                domain_requests.append(
+                    CountRequest(
+                        model=item.model,
+                        messages=item.messages,
+                        provider=item.provider,
+                        tools=item.tools,
+                    )
+                )
 
         batch_result = await token_counter.count_batch(domain_requests)
 
@@ -180,6 +183,6 @@ async def count_tokens_batch(
         )
 
     except TokenCountError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=str(e)) from e
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Internal error: {e}")
+        raise HTTPException(status_code=500, detail=f"Internal error: {e}") from e

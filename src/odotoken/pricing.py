@@ -4,8 +4,6 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any, Optional
-
 
 DEFAULT_PRICES: dict[str, dict[str, float]] = {
     # Anthropic models (prices per 1M tokens)
@@ -35,7 +33,7 @@ class PricingCalculator:
     def load_prices(self) -> None:
         if self.price_file.exists():
             try:
-                with open(self.price_file, "r", encoding="utf-8") as f:
+                with open(self.price_file, encoding="utf-8") as f:
                     data = json.load(f)
                     if isinstance(data, dict):
                         self.prices.update(data)
@@ -53,7 +51,9 @@ class PricingCalculator:
             if pattern != "default" and pattern in clean_name:
                 return rates
 
-        return self.prices.get("default", {"input": 0.0, "output": 0.0, "cache_read": 0.0, "cache_write": 0.0})
+        return self.prices.get(
+            "default", {"input": 0.0, "output": 0.0, "cache_read": 0.0, "cache_write": 0.0}
+        )
 
     def calculate_cost(
         self,

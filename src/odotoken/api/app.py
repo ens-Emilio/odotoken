@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
+from typing import Any
 
 from fastapi import FastAPI
 
@@ -32,6 +33,7 @@ def create_app(config_path: str = "config.json") -> FastAPI:
     async def lifespan(app: FastAPI):
         # Startup
         import asyncio
+
         await asyncio.sleep(0.1)  # Allow remote adapters to register
         yield
         # Shutdown
@@ -55,3 +57,22 @@ def create_app(config_path: str = "config.json") -> FastAPI:
     app.include_router(health.router)
 
     return app
+
+
+def attach_token_counter_routes(app: FastAPI, config: dict[str, Any]) -> None:
+    """Attach token-counting routes (/v1/count, /v1/models, health extras)
+    onto an existing app (the proxy), sharing one process and port."""
+    from odotoken.api.routes import count, health, models
+
+    app.include_router(count.router)
+    app.include_router(models.router)
+    app.include_router(health.router)
+
+    # Build the counter once and stash it in app.state for the routes' dependency
+    cfg = get_token_counter_config(config)
+    catalog = ModelCatalog()
+    cache = TokenCache(cfg)
+    app.state.token_counter = TokenCounter(cfg, catalog, cache)
+
+    # Register the ready/metrics catch-alls last so they don't shadow /v1/*
+    app.router.routes.sort(key=lambda r: 1 if "{" in getattr(r, "path", "") else 0)
