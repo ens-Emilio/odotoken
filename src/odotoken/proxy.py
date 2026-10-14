@@ -16,6 +16,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 
 from odotoken.db import Database, TokenEvent
 from odotoken.guard import Guard
+from odotoken.infra.redact import build_redactor
 from odotoken.parser import StreamUsageAccumulator, UsageParser
 from odotoken.pricing import PricingCalculator
 from odotoken.services.model_catalog import ModelCatalog
@@ -39,6 +40,8 @@ def create_proxy_app(
 
     app = FastAPI(title="odotoken - AI Token Proxy", version="0.1.0", lifespan=lifespan)
     catalog = ModelCatalog()
+    privacy_cfg = config.get("privacy", {})
+    redactor = build_redactor(config)
 
     providers_config = config.get(
         "providers",
@@ -108,6 +111,21 @@ def create_proxy_app(
             target_url = f"{target_url}?{request.url.query}"
 
         body = await request.body()
+        # Opt-in prompt preview: hash + redacted 200-char snippet, never raw text.
+        prompt_meta: dict[str, Any] = {"incognito": True}
+        if body and privacy_cfg.get("store_prompts", False):
+            import hashlib
+
+            try:
+                body_preview = json.loads(body).get("messages", "")
+                preview_src = json.dumps(body_preview)[:200]
+            except Exception:
+                preview_src = ""
+            prompt_meta = {
+                "incognito": False,
+                "prompt_sha256": hashlib.sha256(body).hexdigest()[:16],
+                "prompt_preview": redactor.redact(preview_src) if preview_src else "",
+            }
         fallback_model = ""
         is_stream = False
         if body:
@@ -181,6 +199,7 @@ def create_proxy_app(
                             client_app=client_app,
                             shadow_cost=shadow,
                             project_id=project_id,
+                            metadata=json.dumps(prompt_meta),
                             prompt_tokens=usage.prompt_tokens,
                             completion_tokens=usage.completion_tokens,
                             total_tokens=usage.total_tokens,
@@ -252,6 +271,7 @@ def create_proxy_app(
                         client_app=client_app,
                         shadow_cost=shadow_cost,
                         project_id=project_id,
+                        metadata=json.dumps(prompt_meta),
                         prompt_tokens=prompt_tokens,
                         completion_tokens=completion_tokens,
                         total_tokens=prompt_tokens + completion_tokens,

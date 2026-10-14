@@ -76,7 +76,7 @@ def setup_logging(level: str = "INFO", json_format: bool = False) -> None:
     if json_format:
         formatter = JsonFormatter()
     else:
-        formatter = logging.Formatter(
+        formatter = _RedactingFormatter(
             "%(asctime)s | %(levelname)-8s | %(name)s | %(message)s", datefmt="%Y-%m-%d %H:%M:%S"
         )
 
@@ -93,6 +93,28 @@ def setup_logging(level: str = "INFO", json_format: bool = False) -> None:
     logging.getLogger("uvicorn.access").setLevel(logging.WARNING)
 
 
+# PII redaction hook — None until set_redactor() installs one (no-op then).
+_redactor = None
+
+
+def set_redactor(redactor) -> None:
+    """Install the PII redactor used by all log formatters."""
+    globals()["_redactor"] = redactor
+
+
+def _redact(text: str) -> str:
+    if _redactor is None:
+        return text
+    return _redactor.redact(text)
+
+
+class _RedactingFormatter(logging.Formatter):
+    """Text formatter that passes the rendered message through the redactor."""
+
+    def format(self, record: logging.LogRecord) -> str:
+        return _redact(super().format(record))
+
+
 class JsonFormatter(logging.Formatter):
     """JSON log formatter for structured logging."""
 
@@ -101,7 +123,7 @@ class JsonFormatter(logging.Formatter):
             "timestamp": datetime.now(UTC).isoformat(),
             "level": record.levelname,
             "logger": record.name,
-            "message": record.getMessage(),
+            "message": _redact(record.getMessage()),
         }
 
         reserved = {

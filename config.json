@@ -83,5 +83,10 @@
       "chars_per_token": 4.0,
       "words_per_token": 0.75
     }
+  },
+  "privacy": {
+    "redact_logs": true,
+    "store_prompts": false,
+    "custom_patterns": []
   }
 }
