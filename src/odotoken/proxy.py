@@ -14,6 +14,7 @@ import httpx
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 
+from odotoken.api.chaos import ChaosMiddleware, is_mock_upstream, synthesize_response
 from odotoken.db import Database, TokenEvent
 from odotoken.guard import Guard
 from odotoken.infra.redact import build_redactor
@@ -39,6 +40,10 @@ def create_proxy_app(
         await http_client.aclose()
 
     app = FastAPI(title="odotoken - AI Token Proxy", version="0.1.0", lifespan=lifespan)
+    if config.get("chaos", {}).get("enabled", False):
+        app.add_middleware(ChaosMiddleware, chaos_cfg=config.get("chaos", {}))
+        logger.info("Chaos middleware enabled (rate=%s)", config["chaos"].get("rate"))
+
     catalog = ModelCatalog()
     privacy_cfg = config.get("privacy", {})
     redactor = build_redactor(config)
@@ -138,6 +143,41 @@ def create_proxy_app(
                 pass
 
         start_time = time.perf_counter()
+
+        # Mock upstream: synthesize a deterministic response, no network.
+        if is_mock_upstream(upstream_base):
+            try:
+                prompt_text = " ".join(
+                    m.get("content", "") if isinstance(m.get("content"), str) else ""
+                    for m in json.loads(body).get("messages", [])
+                )
+            except Exception:
+                prompt_text = ""
+            mock = synthesize_response(fallback_model or "mock-model", prompt_text)
+            usage = mock["usage"]
+            mock_cost = pricing.calculate_cost(
+                fallback_model or "mock-model",
+                usage["prompt_tokens"],
+                usage["completion_tokens"],
+            )
+            await asyncio.to_thread(
+                db.record_event,
+                TokenEvent(
+                    provider="mock",
+                    model=fallback_model or "mock-model",
+                    client_app=client_app,
+                    prompt_tokens=usage["prompt_tokens"],
+                    completion_tokens=usage["completion_tokens"],
+                    total_tokens=usage["total_tokens"],
+                    cost_usd=mock_cost,
+                    shadow_cost=mock_cost,
+                    project_id=project_id,
+                    latency_ms=0.0,
+                    status_code=200,
+                    metadata=json.dumps(prompt_meta),
+                ),
+            )
+            return JSONResponse(content=mock, status_code=200)
 
         try:
             req = http_client.build_request(

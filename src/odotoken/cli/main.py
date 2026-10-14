@@ -80,6 +80,13 @@ def start(
     proxy_app = create_proxy_app(database, PricingCalculator(cfg.get("prices", "prices.json")), guard, cfg)
     register_dashboard_routes(proxy_app, database, guard)
 
+    # Prometheus text-format metrics (replaces the JSON /metrics when the
+    # token counter is off; served on the proxy port)
+    from odotoken.api.prometheus_metrics import register_prometheus_route
+
+    register_prometheus_route(proxy_app, database, guard)
+    console.print("[green]Prometheus: http://127.0.0.1:8090/metrics[/green]")
+
     # Token counting routes (/v1/count, /v1/count/batch, /v1/models) live on
     # the same app when token_counter is enabled — no separate service needed.
     if get_token_counter_config(cfg).enabled:

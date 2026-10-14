@@ -183,6 +183,14 @@ The public pricing API needs no auth key for reads (rate limited: 10 req/s per I
 | `database.path` | SQLite file (WAL mode) | `odotoken.db` |
 | `token_counter.enabled` | pre-flight counting middleware on the proxy | `false` |
 
+## Project tags, shadow pricing & privacy
+
+- **Project tags** — send `X-Odo-Project: <name>` (or `X-Project`) on any request; costs segment per project in the dashboard, `/api/stats?project=<id>`, and `odotoken stats --by-project`.
+- **Shadow pricing** — local models (free rates) get a `shadow_cost` priced at the configured `cloud_equivalent` model; the dashboard shows a "Saved vs Cloud" KPI when savings exist.
+- **Privacy** — logs pass through a PII redactor (keys, tokens, emails, CPF/CNPJ, home paths; extend via `privacy.custom_patterns`). `privacy.store_prompts` (default **false**) opts into storing only a SHA-256 hash + 200-char redacted preview per event.
+- **Prometheus** — `GET /metrics` on the proxy port serves text-format metrics; import `examples/grafana-dashboard.json` or run `docker compose -f examples/docker-compose.observability.yml up -d`.
+- **Mock & chaos** — set a provider upstream to `mock://local` for synthetic responses (no network, still metered). Enable `chaos: {enabled: true, rate: 0.05, errors: [429,500], latency_ms: 3000}` to test client resilience; `X-Odo-No-Chaos: true` bypasses.
+
 ## Troubleshooting
 
 **All CLIs fail at once with `ECONNREFUSED 127.0.0.1:8090`** — the proxy is down, not your providers. Quick triage:

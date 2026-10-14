@@ -1,0 +1,79 @@
+{
+  "title": "odotoken — Token & Cost Overview",
+  "uid": "odotoken-overview",
+  "tags": ["odotoken"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "refresh": "30s",
+  "panels": [
+    {
+      "id": 1,
+      "title": "Requests / s",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+      "targets": [{ "expr": "rate(odotoken_requests_total[5m])", "legendFormat": "requests" }]
+    },
+    {
+      "id": 2,
+      "title": "Tokens / s (by direction)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+      "targets": [
+        { "expr": "rate(odotoken_tokens_total[5m])", "legendFormat": "{{direction}}" }
+      ]
+    },
+    {
+      "id": 3,
+      "title": "Cumulative cost (USD)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+      "targets": [
+        { "expr": "odotoken_cost_dollars_total", "legendFormat": "{{kind}}" }
+      ]
+    },
+    {
+      "id": 4,
+      "title": "Cost by project (USD)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
+      "targets": [
+        { "expr": "odotoken_project_cost_dollars_total", "legendFormat": "{{project}}" }
+      ]
+    },
+    {
+      "id": 5,
+      "title": "Avg latency (ms)",
+      "type": "stat",
+      "gridPos": { "h": 5, "w": 6, "x": 0, "y": 16 },
+      "targets": [{ "expr": "odotoken_request_latency_ms_avg" }]
+    },
+    {
+      "id": 6,
+      "title": "Budget remaining (%)",
+      "type": "gauge",
+      "gridPos": { "h": 5, "w": 6, "x": 6, "y": 16 },
+      "targets": [{ "expr": "odotoken_budget_remaining_percentage" }],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "orange", "value": 20 },
+              { "color": "green", "value": 50 }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": 7,
+      "title": "Top models (requests)",
+      "type": "table",
+      "gridPos": { "h": 5, "w": 12, "x": 12, "y": 16 },
+      "targets": [
+        { "expr": "topk(10, odotoken_model_requests_total)", "format": "table", "instant": true }
+      ]
+    }
+  ]
+}

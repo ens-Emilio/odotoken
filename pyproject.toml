@@ -73,6 +73,8 @@ ignore = [
 "src/odotoken/cli/*" = ["ASYNC230", "ASYNC240"]
 # /tmp/odotoken.pid: fixed path is the CLI contract (start writes, stop reads)
 "src/odotoken/cli/main.py" = ["S108", "S108"]
+# chaos.py: seeded random.Random for deterministic chaos tests, not crypto
+"src/odotoken/api/chaos.py" = ["S311"]
 # dashboard.py carries a large inline HTML/JS template; prettier for markup
 # would mangle it. Line length exempted there.
 "src/odotoken/dashboard.py" = ["E501"]  # assert usage in tests is the point

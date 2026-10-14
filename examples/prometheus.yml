@@ -1,0 +1,12 @@
+# Prometheus scrape config for odotoken.
+# Copy to your Prometheus config dir and adjust the host if odotoken
+# runs on another machine.
+scrape_configs:
+  - job_name: odotoken
+    scrape_interval: 15s
+    metrics_path: /metrics
+    static_configs:
+      - targets:
+          - "host.docker.internal:8090" # from docker-compose
+        labels:
+          service: odotoken
