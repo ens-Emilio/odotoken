@@ -72,10 +72,26 @@ export interface GuardInfo {
   reason: string
 }
 
+export interface ProjectRow {
+  project_id: string
+  requests: number
+  total_tokens: number
+  cost_usd: number
+  shadow_cost_usd: number
+}
+
+export interface Savings {
+  actual_usd: number
+  shadow_usd: number
+  saved_usd: number
+}
+
 export interface Stats {
   summary: Summary
   by_model: ModelRow[]
   by_client: ClientRow[]
+  by_project: ProjectRow[]
+  savings: Savings
   recent_events: EventRow[]
   daily: DailyRow[]
   guard: GuardInfo

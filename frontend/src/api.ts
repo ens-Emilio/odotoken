@@ -1,11 +1,15 @@
 import { useQuery } from '@tanstack/react-query'
 import type { Stats } from './types'
 
-export function useStats(since?: string) {
+export function useStats(since?: string, project?: string) {
+  const params = new URLSearchParams()
+  if (since) params.set('since', since)
+  if (project && project !== 'all') params.set('project', project)
+  const qs = params.toString()
   return useQuery<Stats>({
-    queryKey: ['stats', since ?? 'all'],
+    queryKey: ['stats', since ?? 'all', project ?? 'all'],
     queryFn: async () => {
-      const url = since ? `/api/stats?since=${encodeURIComponent(since)}` : '/api/stats'
+      const url = qs ? `/api/stats?${qs}` : '/api/stats'
       const res = await fetch(url)
       if (!res.ok) throw new Error(`stats: ${res.status}`)
       return res.json()

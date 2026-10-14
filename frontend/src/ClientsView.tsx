@@ -4,9 +4,9 @@ import { Card, CardHeader, Badge } from './ui/Card'
 import { SortableTable, type Column } from './ui/SortableTable'
 import type { ClientRow } from './types'
 
-export default function ClientsView({ timeFilter }: { timeFilter: string }) {
+export default function ClientsView({ timeFilter, project }: { timeFilter: string; project: string }) {
   const since = sinceForFilter(timeFilter)
-  const { data, isLoading } = useStats(since)
+  const { data, isLoading } = useStats(since, project)
 
   if (isLoading) return <div className="p-5 text-[12px] text-[var(--text-soft)]">Loading…</div>
   if (!data) return null

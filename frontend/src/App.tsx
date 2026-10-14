@@ -6,12 +6,12 @@ import { useStats } from './api'
 import type { ViewId } from './views'
 import { OverviewView, ModelsView, ClientsView, EventsView, GuardView, SettingsView } from './views'
 
-function View({ id, timeFilter }: { id: ViewId; timeFilter: string }) {
+function View({ id, timeFilter, project }: { id: ViewId; timeFilter: string; project: string }) {
   switch (id) {
-    case 'overview': return <OverviewView timeFilter={timeFilter} />
-    case 'models': return <ModelsView timeFilter={timeFilter} />
-    case 'clients': return <ClientsView timeFilter={timeFilter} />
-    case 'events': return <EventsView timeFilter={timeFilter} />
+    case 'overview': return <OverviewView timeFilter={timeFilter} project={project} />
+    case 'models': return <ModelsView timeFilter={timeFilter} project={project} />
+    case 'clients': return <ClientsView timeFilter={timeFilter} project={project} />
+    case 'events': return <EventsView timeFilter={timeFilter} project={project} />
     case 'guard': return <GuardView />
     case 'settings': return <SettingsView />
   }
@@ -20,9 +20,10 @@ function View({ id, timeFilter }: { id: ViewId; timeFilter: string }) {
 export default function App() {
   const [view, setView] = useState<ViewId>(() => (location.hash.slice(1) as ViewId) || 'overview')
   const [timeFilter, setTimeFilter] = useState('today')
+  const [project, setProject] = useState('all')
   const theme = useTheme()
 
-  const { data } = useStats()
+  const { data } = useStats(undefined, project)
   const guardStatus = data?.guard.status ?? 'ok'
   const prevStatus = useRef(guardStatus)
 
@@ -71,6 +72,18 @@ export default function App() {
                 </button>
               ))}
             </div>
+            <select
+              value={project}
+              onChange={(e) => setProject(e.target.value)}
+              className="rounded-lg border border-[var(--border)] bg-[var(--bg-panel)] px-2.5 py-1.5 text-[11px] font-medium text-[var(--text-muted)]"
+            >
+              <option value="all">All projects</option>
+              {(data?.by_project ?? []).map((p) => (
+                <option key={p.project_id} value={p.project_id}>
+                  {p.project_id} ({p.requests})
+                </option>
+              ))}
+            </select>
             <button
               className="rounded-lg border border-[var(--border)] bg-[var(--bg-panel)] p-2 text-[var(--text-muted)] hover:text-[var(--text-strong)]"
               title={`Theme: ${theme.mode}`}
@@ -89,7 +102,7 @@ export default function App() {
             exit={{ opacity: 0, y: -6 }}
             transition={{ duration: 0.15 }}
           >
-            <View id={view} timeFilter={timeFilter} />
+            <View id={view} timeFilter={timeFilter} project={project} />
           </motion.main>
         </AnimatePresence>
       </div>

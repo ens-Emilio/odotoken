@@ -6,9 +6,9 @@ import { SortableTable, type Column } from './ui/SortableTable'
 import { Dialog } from './ui/Dialog'
 import type { EventRow } from './types'
 
-export default function EventsView({ timeFilter }: { timeFilter: string }) {
+export default function EventsView({ timeFilter, project }: { timeFilter: string; project: string }) {
   const since = sinceForFilter(timeFilter)
-  const { data, isLoading } = useStats(since)
+  const { data, isLoading } = useStats(since, project)
   const [selected, setSelected] = useState<EventRow | null>(null)
 
   if (isLoading) return <div className="p-5 text-[12px] text-[var(--text-soft)]">Loading…</div>

@@ -3,7 +3,7 @@ import { formatNumber, formatCurrency, formatLatency, sinceForFilter } from './f
 import { Card, CardHeader, Badge } from './ui/Card'
 import { SortableTable, type Column } from './ui/SortableTable'
 import { BarChart, Bar, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts'
-import type { EventRow } from './types'
+import type { EventRow, ProjectRow } from './types'
 
 const PIE_COLORS = ['var(--chart-1)', 'var(--chart-2)', 'var(--chart-3)', 'var(--chart-4)', 'var(--chart-5)', 'var(--chart-6)', 'var(--chart-7)']
 
@@ -17,14 +17,14 @@ function Kpi({ label, value, sub, color }: { label: string; value: string; sub: 
   )
 }
 
-export default function OverviewView({ timeFilter }: { timeFilter: string }) {
+export default function OverviewView({ timeFilter, project }: { timeFilter: string; project: string }) {
   const since = sinceForFilter(timeFilter)
-  const { data, isLoading, error } = useStats(since)
+  const { data, isLoading, error } = useStats(since, project)
 
   if (isLoading) return <div className="p-5 text-[12px] text-[var(--text-soft)]">Loading…</div>
   if (error || !data) return <div className="p-5 text-[12px] text-[var(--danger-ink)]">Failed to load stats.</div>
 
-  const { summary, by_model, by_client, recent_events, daily, guard } = data
+  const { summary, by_model, by_project, savings, recent_events, daily, guard } = data
   const guardTone = guard.status === 'breached' ? 'danger' : guard.status === 'warning' ? 'warn' : 'brand'
 
   const eventColumns: Column<EventRow>[] = [
@@ -60,6 +60,9 @@ export default function OverviewView({ timeFilter }: { timeFilter: string }) {
         <Kpi label="Total Tokens" value={formatNumber(summary.total_tokens)} sub="prompt + completion" color="text-[var(--text-strong)]" />
         <Kpi label="Cache Savings" value={formatNumber(summary.total_cache_read_tokens)} sub="cached read tokens" color="text-[var(--chart-6)]" />
         <Kpi label="Total Requests" value={formatNumber(summary.total_requests)} sub={`avg latency ${formatLatency(summary.avg_latency_ms)}`} color="text-[var(--text-strong)]" />
+        {savings && savings.saved_usd > 0.0001 && (
+          <Kpi label="Saved vs Cloud" value={formatCurrency(savings.saved_usd)} sub={`shadow cost ${formatCurrency(savings.shadow_usd)}`} color="text-[var(--chart-6)]" />
+        )}
       </div>
 
       {/* Charts */}
@@ -123,15 +126,16 @@ export default function OverviewView({ timeFilter }: { timeFilter: string }) {
         </Card>
 
         <Card>
-          <CardHeader title="Client Apps" subtitle="usage per CLI agent" />
+          <CardHeader title="Projects" subtitle="cost per X-Odo-Project tag" />
           <SortableTable
-            rows={by_client}
-            rowKey={(c) => c.client_app}
+            rows={by_project ?? ([] as ProjectRow[])}
+            rowKey={(p) => p.project_id}
             pageSize={8}
             columns={[
-              { key: 'app', header: 'App', render: (c) => <Badge>{c.client_app}</Badge>, sortValue: (c) => c.client_app },
-              { key: 'tokens', header: 'Tokens', align: 'right', render: (c) => <span className="num">{formatNumber(c.total_tokens)}</span>, sortValue: (c) => c.total_tokens },
-              { key: 'cost', header: 'Cost', align: 'right', render: (c) => <span className="num text-[var(--brand-ink)]">{formatCurrency(c.cost_usd)}</span>, sortValue: (c) => c.cost_usd },
+              { key: 'project', header: 'Project', render: (p) => <Badge>{p.project_id}</Badge>, sortValue: (p) => p.project_id },
+              { key: 'tokens', header: 'Tokens', align: 'right', render: (p) => <span className="num">{formatNumber(p.total_tokens)}</span>, sortValue: (p) => p.total_tokens },
+              { key: 'cost', header: 'Cost', align: 'right', render: (p) => <span className="num text-[var(--brand-ink)]">{formatCurrency(p.cost_usd)}</span>, sortValue: (p) => p.cost_usd },
+              { key: 'shadow', header: 'Shadow', align: 'right', render: (p) => <span className="num text-[var(--text-soft)]">{formatCurrency(p.shadow_cost_usd)}</span>, sortValue: (p) => p.shadow_cost_usd },
             ]}
           />
         </Card>

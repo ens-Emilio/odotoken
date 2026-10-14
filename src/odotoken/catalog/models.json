@@ -4,7 +4,10 @@
   "models": [
     {
       "id": "gpt-4o",
-      "aliases": ["gpt-4o-2024-05-13", "gpt-4o-2024-08-06"],
+      "aliases": [
+        "gpt-4o-2024-05-13",
+        "gpt-4o-2024-08-06"
+      ],
       "provider": "openai",
       "family": "gpt-4",
       "context_window": 128000,
@@ -17,11 +20,14 @@
       "chat_overhead": 3,
       "message_overhead": 3,
       "tool_overhead": 0,
-      "notes": "OpenAI GPT-4o model"
+      "notes": "OpenAI GPT-4o model",
+      "cloud_equivalent": ""
     },
     {
       "id": "gpt-4o-mini",
-      "aliases": ["gpt-4o-mini-2024-07-18"],
+      "aliases": [
+        "gpt-4o-mini-2024-07-18"
+      ],
       "provider": "openai",
       "family": "gpt-4",
       "context_window": 128000,
@@ -34,11 +40,15 @@
       "chat_overhead": 3,
       "message_overhead": 3,
       "tool_overhead": 0,
-      "notes": "OpenAI GPT-4o Mini model"
+      "notes": "OpenAI GPT-4o Mini model",
+      "cloud_equivalent": ""
     },
     {
       "id": "claude-3-5-sonnet-20241022",
-      "aliases": ["claude-3-5-sonnet-latest", "claude-3-5-sonnet-20240620"],
+      "aliases": [
+        "claude-3-5-sonnet-latest",
+        "claude-3-5-sonnet-20240620"
+      ],
       "provider": "anthropic",
       "family": "claude-3-5",
       "context_window": 200000,
@@ -51,11 +61,14 @@
       "chat_overhead": 0,
       "message_overhead": 0,
       "tool_overhead": 0,
-      "notes": "Anthropic Claude 3.5 Sonnet model"
+      "notes": "Anthropic Claude 3.5 Sonnet model",
+      "cloud_equivalent": ""
     },
     {
       "id": "claude-3-5-haiku-20241022",
-      "aliases": ["claude-3-5-haiku-latest"],
+      "aliases": [
+        "claude-3-5-haiku-latest"
+      ],
       "provider": "anthropic",
       "family": "claude-3-5",
       "context_window": 200000,
@@ -68,11 +81,15 @@
       "chat_overhead": 0,
       "message_overhead": 0,
       "tool_overhead": 0,
-      "notes": "Anthropic Claude 3.5 Haiku model"
+      "notes": "Anthropic Claude 3.5 Haiku model",
+      "cloud_equivalent": ""
     },
     {
       "id": "gemini-1.5-pro",
-      "aliases": ["gemini-1.5-pro-001", "gemini-1.5-pro-002"],
+      "aliases": [
+        "gemini-1.5-pro-001",
+        "gemini-1.5-pro-002"
+      ],
       "provider": "gemini",
       "family": "gemini-1.5",
       "context_window": 2097152,
@@ -85,11 +102,15 @@
       "chat_overhead": 0,
       "message_overhead": 0,
       "tool_overhead": 0,
-      "notes": "Google Gemini 1.5 Pro model"
+      "notes": "Google Gemini 1.5 Pro model",
+      "cloud_equivalent": ""
     },
     {
       "id": "gemini-1.5-flash",
-      "aliases": ["gemini-1.5-flash-001", "gemini-1.5-flash-002"],
+      "aliases": [
+        "gemini-1.5-flash-001",
+        "gemini-1.5-flash-002"
+      ],
       "provider": "gemini",
       "family": "gemini-1.5",
       "context_window": 1048576,
@@ -102,11 +123,14 @@
       "chat_overhead": 0,
       "message_overhead": 0,
       "tool_overhead": 0,
-      "notes": "Google Gemini 1.5 Flash model"
+      "notes": "Google Gemini 1.5 Flash model",
+      "cloud_equivalent": ""
     },
     {
       "id": "llama3-8b",
-      "aliases": ["llama3-8b-instruct"],
+      "aliases": [
+        "llama3-8b-instruct"
+      ],
       "provider": "ollama",
       "family": "llama3",
       "context_window": 8192,
@@ -119,11 +143,14 @@
       "chat_overhead": 0,
       "message_overhead": 0,
       "tool_overhead": 0,
-      "notes": "Meta Llama 3 8B model (heuristic fallback)"
+      "notes": "Meta Llama 3 8B model (heuristic fallback)",
+      "cloud_equivalent": "gpt-4o-mini"
     },
     {
       "id": "llama3-70b",
-      "aliases": ["llama3-70b-instruct"],
+      "aliases": [
+        "llama3-70b-instruct"
+      ],
       "provider": "ollama",
       "family": "llama3",
       "context_window": 8192,
@@ -136,7 +163,8 @@
       "chat_overhead": 0,
       "message_overhead": 0,
       "tool_overhead": 0,
-      "notes": "Meta Llama 3 70B model (heuristic fallback)"
+      "notes": "Meta Llama 3 70B model (heuristic fallback)",
+      "cloud_equivalent": "gpt-4o"
     }
   ]
 }

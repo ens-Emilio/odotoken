@@ -210,6 +210,7 @@ def stats(
     since: str = typer.Option(None, "--since", help="ISO date filter (e.g., 2024-01-01)"),
     by_model: bool = typer.Option(False, "--by-model", help="Group by model"),
     by_client: bool = typer.Option(False, "--by-client", help="Group by client app"),
+    by_project: bool = typer.Option(False, "--by-project", help="Group by project tag"),
     days: int = typer.Option(30, "--days", help="Daily usage history days"),
 ):
     """Display comprehensive token usage and cost metrics in the terminal."""
@@ -234,6 +235,28 @@ def stats(
                 f"{row['completion_tokens']:,}",
                 f"{row['total_tokens']:,}",
                 f"${row['total_cost_usd']:.6f}",
+            )
+        console.print(table)
+        return
+
+    if by_project:
+        results = database.get_summary_by_project(since=since)
+        table = Table(title="Token Usage by Project")
+        table.add_column("Project", style="cyan")
+        table.add_column("Requests", justify="right")
+        table.add_column("Total Tokens", justify="right")
+        table.add_column("Cost (USD)", justify="right")
+        table.add_column("Shadow (USD)", justify="right", style="magenta")
+        table.add_column("Saved (USD)", justify="right", style="green")
+        for row in results:
+            saved = max(0.0, row["shadow_cost_usd"] - row["cost_usd"])
+            table.add_row(
+                row["project_id"],
+                str(row["requests"]),
+                f"{row['total_tokens']:,}",
+                f"${row['cost_usd']:.6f}",
+                f"${row['shadow_cost_usd']:.6f}",
+                f"${saved:.6f}",
             )
         console.print(table)
         return
@@ -264,6 +287,10 @@ def stats(
     table.add_row("Completion Tokens", f"{summary.get('completion_tokens', 0):,}")
     table.add_row("Total Tokens", f"{summary.get('total_tokens', 0):,}")
     table.add_row("Total Cost (USD)", f"${summary.get('total_cost_usd', 0.0):.6f}")
+    shadow = summary.get("total_shadow_cost_usd", 0.0)
+    actual = summary.get("total_cost_usd", 0.0)
+    if shadow > actual:
+        table.add_row("Saved vs Cloud (USD)", f"${shadow - actual:.6f}")
     console.print(table)
 
     if days > 0:

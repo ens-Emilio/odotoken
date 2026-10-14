@@ -18,6 +18,7 @@ from odotoken.db import Database, TokenEvent
 from odotoken.guard import Guard
 from odotoken.parser import StreamUsageAccumulator, UsageParser
 from odotoken.pricing import PricingCalculator
+from odotoken.services.model_catalog import ModelCatalog
 
 logger = logging.getLogger("odotoken.proxy")
 
@@ -37,6 +38,7 @@ def create_proxy_app(
         await http_client.aclose()
 
     app = FastAPI(title="odotoken - AI Token Proxy", version="0.1.0", lifespan=lifespan)
+    catalog = ModelCatalog()
 
     providers_config = config.get(
         "providers",
@@ -99,6 +101,7 @@ def create_proxy_app(
 
         provider, upstream_base = determine_upstream(request.url.path, headers)
         client_app = UsageParser.identify_client_app(headers)
+        project_id = headers.get("x-odo-project") or headers.get("x-project") or "default"
         forward_path = prepare_forward_path(request.url.path, provider)
         target_url = urljoin(upstream_base.rstrip("/") + "/", forward_path.lstrip("/"))
         if request.url.query:
@@ -162,12 +165,22 @@ def create_proxy_app(
                         cache_read_tokens=usage.cache_read_tokens,
                         cache_write_tokens=usage.cache_write_tokens,
                     )
+                    shadow = pricing.calculate_shadow_cost(
+                        usage.model,
+                        cloud_equivalent=catalog.get_cloud_equivalent(usage.model),
+                        prompt_tokens=usage.prompt_tokens,
+                        completion_tokens=usage.completion_tokens,
+                        cache_read_tokens=usage.cache_read_tokens,
+                        cache_write_tokens=usage.cache_write_tokens,
+                    )
                     await asyncio.to_thread(
                         db.record_event,
                         TokenEvent(
                             provider=provider,
                             model=usage.model,
                             client_app=client_app,
+                            shadow_cost=shadow,
+                            project_id=project_id,
                             prompt_tokens=usage.prompt_tokens,
                             completion_tokens=usage.completion_tokens,
                             total_tokens=usage.total_tokens,
@@ -218,6 +231,14 @@ def create_proxy_app(
                 cache_read_tokens=cache_read,
                 cache_write_tokens=cache_write,
             )
+            shadow_cost = pricing.calculate_shadow_cost(
+                model_name,
+                cloud_equivalent=catalog.get_cloud_equivalent(model_name),
+                prompt_tokens=prompt_tokens,
+                completion_tokens=completion_tokens,
+                cache_read_tokens=cache_read,
+                cache_write_tokens=cache_write,
+            )
 
             # Don't log metering noise: 404s from the catch-all (favicon, stale
             # assets) carry no usage data and pollute the dashboard.
@@ -229,6 +250,8 @@ def create_proxy_app(
                         provider=provider,
                         model=model_name,
                         client_app=client_app,
+                        shadow_cost=shadow_cost,
+                        project_id=project_id,
                         prompt_tokens=prompt_tokens,
                         completion_tokens=completion_tokens,
                         total_tokens=prompt_tokens + completion_tokens,

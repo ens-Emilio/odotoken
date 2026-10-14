@@ -76,3 +76,28 @@ class PricingCalculator:
         ) / 1_000_000.0
 
         return round(cost, 7)
+
+    def calculate_shadow_cost(
+        self,
+        model: str,
+        cloud_equivalent: str = "",
+        prompt_tokens: int = 0,
+        completion_tokens: int = 0,
+        cache_read_tokens: int = 0,
+        cache_write_tokens: int = 0,
+    ) -> float:
+        """Theoretical cost if the request had gone to the cloud-equivalent model.
+
+        For cloud models (paid rates) the shadow cost equals the actual cost —
+        no savings. For local models (free rates, e.g. Ollama) the configured
+        cloud_equivalent model's rates are used.
+        """
+        own_rates = self.get_model_rates(model)
+        if own_rates.get("input", 0) > 0 or own_rates.get("output", 0) > 0:
+            return self.calculate_cost(
+                model, prompt_tokens, completion_tokens, cache_read_tokens, cache_write_tokens
+            )
+        target = cloud_equivalent or model
+        return self.calculate_cost(
+            target, prompt_tokens, completion_tokens, cache_read_tokens, cache_write_tokens
+        )

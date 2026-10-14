@@ -26,8 +26,10 @@ class TokenEvent:
     cache_read_tokens: int = 0
     cache_write_tokens: int = 0
     cost_usd: float = 0.0
+    shadow_cost: float = 0.0  # theoretical cloud-equivalent cost (USD)
     latency_ms: float = 0.0
     status_code: int = 200
+    project_id: str = "default"  # from X-Odo-Project header
     metadata: str = "{}"  # JSON string for extra fields
 
     def to_dict(self) -> dict[str, Any]:
@@ -77,6 +79,16 @@ class Database:
             conn.execute("CREATE INDEX IF NOT EXISTS idx_token_events_timestamp ON token_events(timestamp);")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_token_events_model ON token_events(model);")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_token_events_client ON token_events(client_app);")
+
+            # Idempotent column migrations (SQLite has no ADD COLUMN IF NOT EXISTS)
+            cols = {row[1] for row in conn.execute("PRAGMA table_info(token_events);")}
+            if "project_id" not in cols:
+                conn.execute(
+                    "ALTER TABLE token_events ADD COLUMN project_id TEXT NOT NULL DEFAULT 'default';"
+                )
+            if "shadow_cost" not in cols:
+                conn.execute("ALTER TABLE token_events ADD COLUMN shadow_cost REAL NOT NULL DEFAULT 0.0;")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_token_events_project ON token_events(project_id);")
             conn.commit()
 
     def record_event(self, event: TokenEvent) -> int:
@@ -93,8 +105,9 @@ class Database:
                     timestamp, provider, model, client_app,
                     prompt_tokens, completion_tokens, total_tokens,
                     cache_read_tokens, cache_write_tokens,
-                    cost_usd, latency_ms, status_code, metadata
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    cost_usd, shadow_cost, latency_ms, status_code,
+                    project_id, metadata
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     event.timestamp,
@@ -107,16 +120,18 @@ class Database:
                     event.cache_read_tokens,
                     event.cache_write_tokens,
                     event.cost_usd,
+                    event.shadow_cost,
                     event.latency_ms,
                     event.status_code,
+                    event.project_id,
                     event.metadata,
                 ),
             )
             conn.commit()
             return cur.lastrowid or 0
 
-    def get_summary(self, since: str | None = None) -> dict[str, Any]:
-        """Aggregate totals across the board, optionally filtered by ISO date/timestamp 'since'."""
+    def get_summary(self, since: str | None = None, project: str | None = None) -> dict[str, Any]:
+        """Aggregate totals, optionally filtered by ISO 'since' and/or project tag."""
         query = """
             SELECT
                 COUNT(*) as total_requests,
@@ -126,13 +141,20 @@ class Database:
                 COALESCE(SUM(cache_read_tokens), 0) as total_cache_read_tokens,
                 COALESCE(SUM(cache_write_tokens), 0) as total_cache_write_tokens,
                 COALESCE(SUM(cost_usd), 0.0) as total_cost_usd,
+                COALESCE(SUM(shadow_cost), 0.0) as total_shadow_cost_usd,
                 COALESCE(AVG(latency_ms), 0.0) as avg_latency_ms
             FROM token_events
         """
         params: list[Any] = []
+        conds = []
         if since:
-            query += " WHERE timestamp >= ?"
+            conds.append("timestamp >= ?")
             params.append(since)
+        if project:
+            conds.append("project_id = ?")
+            params.append(project)
+        if conds:
+            query += " WHERE " + " AND ".join(conds)
 
         with self.connection() as conn:
             row = conn.execute(query, params).fetchone()
@@ -140,7 +162,9 @@ class Database:
                 return {}
             return dict(row)
 
-    def get_summary_by_model(self, since: str | None = None) -> list[dict[str, Any]]:
+    def get_summary_by_model(
+        self, since: str | None = None, project: str | None = None
+    ) -> list[dict[str, Any]]:
         query = """
             SELECT
                 model,
@@ -155,16 +179,24 @@ class Database:
             FROM token_events
         """
         params: list[Any] = []
+        conds = []
         if since:
-            query += " WHERE timestamp >= ?"
+            conds.append("timestamp >= ?")
             params.append(since)
+        if project:
+            conds.append("project_id = ?")
+            params.append(project)
+        if conds:
+            query += " WHERE " + " AND ".join(conds)
         query += " GROUP BY model ORDER BY cost_usd DESC"
 
         with self.connection() as conn:
             rows = conn.execute(query, params).fetchall()
             return [dict(r) for r in rows]
 
-    def get_summary_by_client(self, since: str | None = None) -> list[dict[str, Any]]:
+    def get_summary_by_client(
+        self, since: str | None = None, project: str | None = None
+    ) -> list[dict[str, Any]]:
         query = """
             SELECT
                 client_app,
@@ -174,24 +206,59 @@ class Database:
             FROM token_events
         """
         params: list[Any] = []
+        conds = []
         if since:
-            query += " WHERE timestamp >= ?"
+            conds.append("timestamp >= ?")
             params.append(since)
+        if project:
+            conds.append("project_id = ?")
+            params.append(project)
+        if conds:
+            query += " WHERE " + " AND ".join(conds)
         query += " GROUP BY client_app ORDER BY cost_usd DESC"
 
         with self.connection() as conn:
             rows = conn.execute(query, params).fetchall()
             return [dict(r) for r in rows]
 
-    def get_recent_events(self, limit: int = 50) -> list[dict[str, Any]]:
+    def get_summary_by_project(self, since: str | None = None) -> list[dict[str, Any]]:
         query = """
-            SELECT *
+            SELECT
+                project_id,
+                COUNT(*) as requests,
+                SUM(total_tokens) as total_tokens,
+                SUM(cost_usd) as cost_usd,
+                SUM(shadow_cost) as shadow_cost_usd
             FROM token_events
-            ORDER BY id DESC
-            LIMIT ?
         """
+        params: list[Any] = []
+        if since:
+            query += " WHERE timestamp >= ?"
+            params.append(since)
+        query += " GROUP BY project_id ORDER BY cost_usd DESC"
+
         with self.connection() as conn:
-            rows = conn.execute(query, (limit,)).fetchall()
+            rows = conn.execute(query, params).fetchall()
+            return [dict(r) for r in rows]
+
+    def get_recent_events(
+        self, limit: int = 50, since: str | None = None, project: str | None = None
+    ) -> list[dict[str, Any]]:
+        query = "SELECT * FROM token_events"
+        params: list[Any] = []
+        conds = []
+        if since:
+            conds.append("timestamp >= ?")
+            params.append(since)
+        if project:
+            conds.append("project_id = ?")
+            params.append(project)
+        if conds:
+            query += " WHERE " + " AND ".join(conds)
+        query += " ORDER BY id DESC LIMIT ?"
+        params.append(limit)
+        with self.connection() as conn:
+            rows = conn.execute(query, params).fetchall()
             return [dict(r) for r in rows]
 
     def get_daily_usage(self, days: int = 30) -> list[dict[str, Any]]:

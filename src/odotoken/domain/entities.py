@@ -71,6 +71,7 @@ class ModelInfo:
     supports_vision: bool = False
     counting_method: str = "heuristic"  # remote, local, heuristic
     tokenizer: str | None = None
+    cloud_equivalent: str = ""  # cloud model for shadow pricing of local models
     chat_overhead: int = 0
     message_overhead: int = 0
     tool_overhead: int = 0

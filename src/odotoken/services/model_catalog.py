@@ -93,6 +93,11 @@ class ModelCatalog:
             counting_method="heuristic",
         )
 
+    def get_cloud_equivalent(self, model: str) -> str:
+        """Cloud-equivalent model id for shadow pricing (empty if unknown)."""
+        info = self.get_optional(model)
+        return info.cloud_equivalent if info else ""
+
     @property
     def version(self) -> str:
         return self._version

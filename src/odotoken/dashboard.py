@@ -373,12 +373,20 @@ def register_dashboard_routes(app: FastAPI, db: Database, guard: Guard | None = 
             return FileResponse(str(static_dir / "index.html"))
 
     @app.get("/api/stats")
-    async def stats_api(since: str | None = None):
-        summary = db.get_summary(since=since)
-        by_model = db.get_summary_by_model(since=since)
-        by_client = db.get_summary_by_client(since=since)
-        recent_events = db.get_recent_events(limit=50)
+    async def stats_api(since: str | None = None, project: str | None = None):
+        summary = db.get_summary(since=since, project=project)
+        by_model = db.get_summary_by_model(since=since, project=project)
+        by_client = db.get_summary_by_client(since=since, project=project)
+        by_project = db.get_summary_by_project(since=since)
+        recent_events = db.get_recent_events(limit=50, project=project)
         daily = db.get_daily_usage(days=30)
+        savings = {
+            "actual_usd": summary.get("total_cost_usd", 0.0),
+            "shadow_usd": summary.get("total_shadow_cost_usd", 0.0),
+            "saved_usd": max(
+                0.0, summary.get("total_shadow_cost_usd", 0.0) - summary.get("total_cost_usd", 0.0)
+            ),
+        }
 
         guard_info = {}
         if guard:
@@ -412,6 +420,8 @@ def register_dashboard_routes(app: FastAPI, db: Database, guard: Guard | None = 
                 "summary": summary,
                 "by_model": by_model,
                 "by_client": by_client,
+                "by_project": by_project,
+                "savings": savings,
                 "recent_events": recent_events,
                 "daily": daily,
                 "guard": guard_info,
