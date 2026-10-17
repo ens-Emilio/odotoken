@@ -42,3 +42,6 @@ pip-log.txt
 # Type checking
 .mypy_cache/
 .ruff_cache/
+
+# Local plans (untracked working notes)
+PLAN*.md
