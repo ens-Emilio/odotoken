@@ -1,6 +1,6 @@
 import type { ReactNode, HTMLAttributes } from 'react'
 
-export function Card({ children, className, ...rest }: { children: ReactNode; className?: string } & HTMLAttributes<HTMLDivElement>) {
+export function Card({ children, className, ...rest }: { children?: ReactNode; className?: string } & HTMLAttributes<HTMLDivElement>) {
   return (
     <div
       className={`rounded-[var(--radius)] border border-[var(--border)] bg-[var(--bg-panel)] shadow-[var(--shadow-panel)] ${className ?? ''}`}
@@ -37,6 +37,11 @@ export function Badge({ children, tone = 'neutral' }: { children: ReactNode; ton
   )
 }
 
-export function Empty({ label }: { label: string }) {
-  return <div className="py-6 text-center text-[12px] text-[var(--text-faint)]">{label}</div>
+export function Empty({ label, hint }: { label: string; hint?: string }) {
+  return (
+    <div className="flex flex-col items-center gap-1 py-8 text-center">
+      <div className="text-[12px] font-medium text-[var(--text-soft)]">{label}</div>
+      {hint && <div className="text-[11px] text-[var(--text-faint)]">{hint}</div>}
+    </div>
+  )
 }

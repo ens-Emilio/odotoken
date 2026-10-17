@@ -1,6 +1,5 @@
 import { useEffect, useState } from 'react'
-import { PanelLeftClose, PanelLeftOpen, Moon, Sun, Monitor } from 'lucide-react'
-import { Segmented } from './ui/Segmented'
+import { PanelLeftClose, PanelLeftOpen } from 'lucide-react'
 import type { ViewId } from './views'
 
 type ThemeMode = 'light' | 'dark' | 'system'
@@ -14,7 +13,10 @@ const VIEW_META: Record<ViewId, { label: string }> = {
   settings: { label: 'Settings' },
 }
 
-const VIEW_ORDER: ViewId[] = ['overview', 'models', 'clients', 'events', 'guard', 'settings']
+const VIEW_GROUPS: { label: string; ids: ViewId[] }[] = [
+  { label: 'Monitor', ids: ['overview', 'models', 'clients', 'events'] },
+  { label: 'Control', ids: ['guard', 'settings'] },
+]
 
 function applyTheme(mode: ThemeMode) {
   const dark = mode === 'dark' || (mode === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches)
@@ -36,51 +38,81 @@ export function useTheme() {
   return { mode, setMode }
 }
 
-export function Sidebar({ view, onView, guardBreached }: { view: ViewId; onView: (v: ViewId) => void; guardBreached: boolean }) {
-  const [open, setOpen] = useState(true)
-
-  return (
-    <aside
-      className={`glass sticky top-0 flex h-screen shrink-0 flex-col border-r transition-[width] duration-200 ${open ? 'w-52' : 'w-14'}`}
-    >
+export function Sidebar({ view, onView, guardBreached, open, onToggle }: { view: ViewId; onView: (v: ViewId) => void; guardBreached: boolean; open: boolean; onToggle: () => void }) {
+  const nav = (
+    <>
       <div className="flex items-center gap-2 px-3 py-4">
         <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-[var(--text-strong)] text-[15px] font-bold text-[var(--bg)]">
           ω
         </div>
         {open && (
-          <span className="text-[14px] font-semibold tracking-tight text-[var(--text-strong)]">odotoken</span>
+          <div className="flex flex-col leading-none">
+            <span className="text-[14px] font-semibold tracking-tight text-[var(--text-strong)]">odotoken</span>
+            <span className="text-[10px] text-[var(--text-faint)]">v0.1.0 · proxy</span>
+          </div>
         )}
       </div>
 
-      <nav className="flex-1 space-y-0.5 px-2">
-        {VIEW_ORDER.map((v) => (
-          <button
-            key={v}
-            onClick={() => onView(v)}
-            title={VIEW_META[v].label}
-            className={`flex w-full items-center gap-2.5 rounded-md px-2.5 py-2 text-[12px] font-medium transition-colors ${
-              view === v
-                ? 'bg-[var(--bg-fill-secondary)] text-[var(--text-strong)]'
-                : 'text-[var(--text-muted)] hover:bg-[var(--bg-fill-tertiary)] hover:text-[var(--text-strong)]'
-            }`}
-          >
-            <ViewIcon id={v} active={view === v} />
-            {open && <span className="truncate">{VIEW_META[v].label}</span>}
-            {open && v === 'guard' && guardBreached && (
-              <span className="ml-auto h-1.5 w-1.5 rounded-full bg-[var(--danger)]" />
-            )}
-          </button>
+      <nav className="flex-1 space-y-4 px-2 pt-2">
+        {VIEW_GROUPS.map((group) => (
+          <div key={group.label}>
+            {open && <div className="mb-1 px-2.5 text-[10px] font-semibold uppercase tracking-wider text-[var(--text-faint)]">{group.label}</div>}
+            <div className="space-y-0.5">
+              {group.ids.map((v) => (
+                <button
+                  key={v}
+                  onClick={() => {
+                    onView(v)
+                    if (window.innerWidth < 768 && open) onToggle()
+                  }}
+                  title={VIEW_META[v].label}
+                  className={`relative flex w-full items-center gap-2.5 rounded-md px-2.5 py-2 text-[12px] font-medium transition-colors ${
+                    view === v
+                      ? 'bg-[var(--bg-fill-secondary)] text-[var(--text-strong)]'
+                      : 'text-[var(--text-muted)] hover:bg-[var(--bg-fill-tertiary)] hover:text-[var(--text-strong)]'
+                  }`}
+                >
+                  {view === v && <span className="absolute inset-y-1 left-0 w-0.5 rounded-full bg-[var(--brand-ink)] dark:bg-[var(--brand)]" aria-hidden />}
+                  <ViewIcon id={v} active={view === v} />
+                  {open && <span className="truncate">{VIEW_META[v].label}</span>}
+                  {v === 'guard' && guardBreached && (
+                    <span className={`h-1.5 w-1.5 rounded-full bg-[var(--danger)] ${open ? 'ml-auto' : 'absolute right-1 top-1'}`} aria-hidden />
+                  )}
+                </button>
+              ))}
+            </div>
+          </div>
         ))}
       </nav>
 
       <button
         className="flex items-center gap-2 rounded-md px-3 py-3 text-[var(--text-soft)] hover:bg-[var(--bg-fill-tertiary)] hover:text-[var(--text-strong)]"
-        onClick={() => setOpen((o) => !o)}
+        onClick={onToggle}
+        aria-label={open ? 'Collapse sidebar' : 'Expand sidebar'}
       >
         {open ? <PanelLeftClose className="h-4 w-4" /> : <PanelLeftOpen className="h-4 w-4" />}
         {open && <span className="text-[11px]">Collapse</span>}
       </button>
-    </aside>
+    </>
+  )
+
+  return (
+    <>
+      {/* Desktop */}
+      <aside className={`glass sticky top-0 hidden h-screen shrink-0 flex-col border-r transition-[width] duration-200 md:flex ${open ? 'w-52' : 'w-14'}`}>
+        {nav}
+      </aside>
+
+      {/* Mobile overlay */}
+      {open && (
+        <div className="fixed inset-0 z-40 flex md:hidden" aria-modal="true" role="dialog">
+          <button type="button" aria-label="Close sidebar" className="absolute inset-0 bg-black/30 backdrop-blur-sm" onClick={onToggle} />
+          <aside className="glass relative flex h-full w-64 shrink-0 flex-col border-r shadow-[var(--shadow-pop)]">
+            {nav}
+          </aside>
+        </div>
+      )}
+    </>
   )
 }
 
@@ -92,41 +124,6 @@ function ViewIcon({ id, active }: { id: ViewId; active: boolean }) {
     case 'clients': return <svg className={cls} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="2" y="4" width="20" height="14" rx="2"/><path d="M6 16v4M18 16v4"/></svg>
     case 'events': return <svg className={cls} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
     case 'guard': return <svg className={cls} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/></svg>
-    case 'settings': return <svg className={cls} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h0a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51h0a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v0a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+    case 'settings': return <svg className={cls} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h0a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51h0a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v0a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0 1.51 1H21z"/></svg>
   }
-}
-
-export function Topbar({ timeFilter, onTimeFilter, theme }: {
-  timeFilter: string
-  onTimeFilter: (v: string) => void
-  theme: { mode: ThemeMode; setMode: (m: ThemeMode) => void }
-}) {
-  const ThemeIcon = theme.mode === 'dark' ? Moon : theme.mode === 'light' ? Sun : Monitor
-
-  return (
-    <header className="sticky top-0 z-30 flex items-center justify-between gap-3 border-b border-[var(--border)] bg-[var(--glass-regular)] px-5 py-3 backdrop-blur-xl">
-      <h2 className="text-[13px] font-semibold text-[var(--text-strong)]">
-        {VIEW_META[timeFilter as ViewId]?.label ?? ''}
-      </h2>
-      <div className="flex items-center gap-3">
-        <Segmented
-          value={timeFilter}
-          onChange={onTimeFilter}
-          options={[
-            { value: 'today', label: 'Today' },
-            { value: '7d', label: '7 days' },
-            { value: '30d', label: '30 days' },
-            { value: 'all', label: 'All' },
-          ]}
-        />
-        <button
-          className="rounded-lg border border-[var(--border)] bg-[var(--bg-panel)] p-2 text-[var(--text-muted)] hover:text-[var(--text-strong)]"
-          title={`Theme: ${theme.mode}`}
-          onClick={() => theme.setMode(theme.mode === 'dark' ? 'light' : theme.mode === 'light' ? 'system' : 'dark')}
-        >
-          <ThemeIcon className="h-3.5 w-3.5" />
-        </button>
-      </div>
-    </header>
-  )
 }

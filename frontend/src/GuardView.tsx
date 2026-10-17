@@ -5,7 +5,7 @@ import { Card, CardHeader, Badge } from './ui/Card'
 export default function GuardView() {
   const { data, isLoading } = useStats()
 
-  if (isLoading) return <div className="p-5 text-[12px] text-[var(--text-soft)]">Loading…</div>
+  if (isLoading) return <div className="p-5"><div className="h-48 animate-pulse rounded-[var(--radius)] bg-[var(--bg-fill-tertiary)]" /></div>
   if (!data || !data.guard.limits) return null
 
   const { guard } = data
@@ -54,7 +54,7 @@ export default function GuardView() {
                 <div key={label}>
                   <div className="mb-1 flex items-center justify-between">
                     <span className="text-[var(--text-muted)]">{label}</span>
-                    <span className="num text-[var(--text-strong)]">{usedStr} / {limitStr}</span>
+                    <span className="num text-[var(--text-strong)]">{usedStr} / {limitStr}{limit !== null ? ` · ${Math.round(pct)}%` : ''}</span>
                   </div>
                   {limit !== null && (
                     <div className="h-1.5 overflow-hidden rounded-full bg-[var(--bg-fill-secondary)]">

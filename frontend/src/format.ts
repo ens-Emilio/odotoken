@@ -3,13 +3,21 @@ export function formatNumber(n: number | undefined | null): string {
 }
 
 export function formatCurrency(n: number | undefined | null): string {
-  return '$' + (n ?? 0).toFixed(4)
+  const v = n ?? 0
+  if (v === 0) return '$0.00'
+  const abs = Math.abs(v)
+  if (abs >= 1000) return '$' + formatNumberCompact(v)
+  if (abs >= 1) return '$' + v.toFixed(2)
+  if (abs >= 0.01) return '$' + v.toFixed(4)
+  return '$' + v.toFixed(6)
 }
 
-export function formatCompact(n: number): string {
-  if (n >= 1_000_000) return (n / 1_000_000).toFixed(1) + 'M'
-  if (n >= 1_000) return (n / 1_000).toFixed(1) + 'k'
-  return String(n)
+export function formatNumberCompact(n: number | undefined | null): string {
+  const v = n ?? 0
+  const abs = Math.abs(v)
+  if (abs >= 1_000_000) return (v / 1_000_000).toFixed(1).replace(/\.0$/, '') + 'M'
+  if (abs >= 1_000) return (v / 1_000).toFixed(1).replace(/\.0$/, '') + 'k'
+  return formatNumber(v)
 }
 
 export function formatLatency(ms: number): string {

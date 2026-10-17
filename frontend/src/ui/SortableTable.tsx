@@ -51,14 +51,14 @@ export function SortableTable<T>({ rows, columns, pageSize = 25, rowKey, onRowCl
 
   return (
     <div>
-      <div className="overflow-x-auto">
+      <div className="table-scroll overflow-x-auto">
         <table className="w-full text-left text-[12px]">
           <thead>
-            <tr className="border-b border-[var(--border)] text-[var(--text-soft)]">
+            <tr className="border-b border-[var(--border)]">
               {columns.map((col) => (
                 <th
                   key={col.key}
-                  className={`py-2.5 px-3 font-medium ${col.align === 'right' ? 'text-right' : ''} ${col.sortValue ? 'cursor-pointer select-none hover:text-[var(--text-strong)]' : ''} ${col.width ?? ''}`}
+                  className={`py-2.5 px-3 text-[11px] font-medium uppercase tracking-wider ${col.align === 'right' ? 'text-right' : 'text-left'} ${col.sortValue ? 'cursor-pointer select-none' : ''} ${sortKey === col.key ? 'text-[var(--text-strong)]' : 'text-[var(--text-soft)] hover:text-[var(--text-strong)]'} ${col.width ?? ''}`}
                   onClick={col.sortValue ? () => toggleSort(col.key) : undefined}
                 >
                   <span className={`inline-flex items-center gap-1 ${col.align === 'right' ? 'flex-row-reverse' : ''}`}>
@@ -66,7 +66,7 @@ export function SortableTable<T>({ rows, columns, pageSize = 25, rowKey, onRowCl
                     {col.sortValue && (
                       sortKey === col.key
                         ? (sortDir === 'asc' ? <ArrowUp className="h-3 w-3" /> : <ArrowDown className="h-3 w-3" />)
-                        : <ChevronsUpDown className="h-3 w-3 opacity-30" />
+                        : <ChevronsUpDown className="h-3 w-3 opacity-40" />
                     )}
                   </span>
                 </th>
@@ -75,7 +75,7 @@ export function SortableTable<T>({ rows, columns, pageSize = 25, rowKey, onRowCl
           </thead>
           <tbody className="divide-y divide-[var(--border-soft)] text-[var(--text)]">
             {pageRows.length === 0 ? (
-              <tr><td colSpan={columns.length} className="py-6 text-center text-[var(--text-faint)]">No data</td></tr>
+              <tr><td colSpan={columns.length} className="py-8 text-center text-[12px] text-[var(--text-soft)]">No data in this period — try a wider time range</td></tr>
             ) : pageRows.map((row) => (
               <tr
                 key={rowKey(row)}
@@ -83,7 +83,7 @@ export function SortableTable<T>({ rows, columns, pageSize = 25, rowKey, onRowCl
                 onClick={onRowClick ? () => onRowClick(row) : undefined}
               >
                 {columns.map((col) => (
-                  <td key={col.key} className={`py-2.5 px-3 ${col.align === 'right' ? 'text-right' : ''}`}>
+                  <td key={col.key} className={`py-3 px-3 ${col.align === 'right' ? 'text-right tabular-nums' : ''}`}>
                     {col.render(row)}
                   </td>
                 ))}
@@ -93,22 +93,13 @@ export function SortableTable<T>({ rows, columns, pageSize = 25, rowKey, onRowCl
         </table>
       </div>
       {sorted.length > pageSize && (
-        <div className="flex items-center justify-end gap-2 border-t border-[var(--border-soft)] px-3 py-2 text-[11px] text-[var(--text-soft)]">
-          <button
-            className="rounded px-2 py-1 hover:bg-[var(--bg-fill-secondary)] disabled:opacity-30"
-            disabled={safePage === 0}
-            onClick={() => setPage(safePage - 1)}
-          >
-            Prev
-          </button>
-          <span className="num">{safePage + 1} / {pageCount}</span>
-          <button
-            className="rounded px-2 py-1 hover:bg-[var(--bg-fill-secondary)] disabled:opacity-30"
-            disabled={safePage >= pageCount - 1}
-            onClick={() => setPage(safePage + 1)}
-          >
-            Next
-          </button>
+        <div className="flex items-center justify-between border-t border-[var(--border-soft)] px-3 py-2 text-[11px] text-[var(--text-soft)]">
+          <span className="num">{sorted.length} rows · page {safePage + 1} of {pageCount}</span>
+          <div className="flex items-center gap-1">
+            <button className="flex h-7 w-7 items-center justify-center rounded-md border border-[var(--border)] hover:bg-[var(--bg-fill-secondary)] disabled:opacity-30" disabled={safePage === 0} onClick={() => setPage(safePage - 1)} aria-label="Previous page">‹</button>
+            <span className="num px-1">{safePage + 1} / {pageCount}</span>
+            <button className="flex h-7 w-7 items-center justify-center rounded-md border border-[var(--border)] hover:bg-[var(--bg-fill-secondary)] disabled:opacity-30" disabled={safePage >= pageCount - 1} onClick={() => setPage(safePage + 1)} aria-label="Next page">›</button>
+          </div>
         </div>
       )}
     </div>

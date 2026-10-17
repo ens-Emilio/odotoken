@@ -14,5 +14,7 @@ export function useStats(since?: string, project?: string) {
       if (!res.ok) throw new Error(`stats: ${res.status}`)
       return res.json()
     },
+    staleTime: 10_000,
+    refetchInterval: 10_000,
   })
 }

@@ -21,6 +21,7 @@ export default function App() {
   const [view, setView] = useState<ViewId>(() => (location.hash.slice(1) as ViewId) || 'overview')
   const [timeFilter, setTimeFilter] = useState('today')
   const [project, setProject] = useState('all')
+  const [sidebarOpen, setSidebarOpen] = useState(true)
   const theme = useTheme()
 
   const { data } = useStats(undefined, project)
@@ -52,11 +53,17 @@ export default function App() {
 
   return (
     <div className="flex min-h-screen">
-      <Sidebar view={view} onView={changeView} guardBreached={guardStatus === 'breached' || guardStatus === 'warning'} />
+      <Sidebar view={view} onView={changeView} guardBreached={guardStatus === 'breached' || guardStatus === 'warning'} open={sidebarOpen} onToggle={() => setSidebarOpen((o) => !o)} />
       <div className="min-w-0 flex-1">
-        <header className="sticky top-0 z-30 flex items-center justify-between gap-3 border-b border-[var(--border)] bg-[var(--glass-regular)] px-5 py-3 backdrop-blur-xl">
-          <h2 className="text-[13px] font-semibold text-[var(--text-strong)]">{viewTitle[view]}</h2>
-          <div className="flex items-center gap-3">
+        <header className="sticky top-0 z-30 flex items-center justify-between gap-3 border-b border-[var(--border)] bg-[var(--glass-regular)] px-3 py-3 backdrop-blur-xl sm:px-5">
+          <div className="flex items-center gap-2">
+            <button className="rounded-md p-2 text-[var(--text-muted)] hover:bg-[var(--bg-fill-secondary)] md:hidden" aria-label="Open navigation" onClick={() => setSidebarOpen(true)}>
+              <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M4 6h16M4 12h16M4 18h16"/></svg>
+            </button>
+            <h2 className="text-[13px] font-semibold text-[var(--text-strong)]">{viewTitle[view]}</h2>
+          </div>
+          <div className="flex flex-wrap items-center justify-end gap-2 sm:gap-3">
+            <span className="hidden text-[11px] font-medium text-[var(--text-soft)] md:inline">Time</span>
             <div className="flex items-center gap-0.5 rounded-lg border border-[var(--border)] bg-[var(--bg-panel)] p-0.5">
               {(['today', '7d', '30d', 'all'] as const).map((f) => (
                 <button
@@ -72,10 +79,13 @@ export default function App() {
                 </button>
               ))}
             </div>
+            <span className="hidden text-[11px] font-medium text-[var(--text-soft)] md:inline">Project</span>
+            <label className="sr-only" htmlFor="project-filter">Project filter</label>
             <select
+              id="project-filter"
               value={project}
               onChange={(e) => setProject(e.target.value)}
-              className="rounded-lg border border-[var(--border)] bg-[var(--bg-panel)] px-2.5 py-1.5 text-[11px] font-medium text-[var(--text-muted)]"
+              className="max-w-[140px] rounded-lg border border-[var(--border)] bg-[var(--bg-panel)] px-2.5 py-1.5 text-[11px] font-medium text-[var(--text-muted)]"
             >
               <option value="all">All projects</option>
               {(data?.by_project ?? []).map((p) => (
@@ -87,6 +97,7 @@ export default function App() {
             <button
               className="rounded-lg border border-[var(--border)] bg-[var(--bg-panel)] p-2 text-[var(--text-muted)] hover:text-[var(--text-strong)]"
               title={`Theme: ${theme.mode}`}
+              aria-label={`Theme: ${theme.mode}`}
               onClick={() => theme.setMode(theme.mode === 'dark' ? 'light' : theme.mode === 'light' ? 'system' : 'dark')}
             >
               <ThemeGlyph mode={theme.mode} />

@@ -8,18 +8,18 @@ export default function ModelsView({ timeFilter, project }: { timeFilter: string
   const since = sinceForFilter(timeFilter)
   const { data, isLoading } = useStats(since, project)
 
-  if (isLoading) return <div className="p-5 text-[12px] text-[var(--text-soft)]">Loading…</div>
+  if (isLoading) return <div className="p-5"><div className="h-64 animate-pulse rounded-[var(--radius)] bg-[var(--bg-fill-tertiary)]" /></div>
   if (!data) return null
 
   const columns: Column<ModelRow>[] = [
     { key: 'model', header: 'Model', render: (m) => <span className="font-medium text-[var(--text-strong)]">{m.model || '—'}</span>, sortValue: (m) => m.model },
     { key: 'provider', header: 'Provider', render: (m) => <Badge>{m.provider}</Badge>, sortValue: (m) => m.provider },
-    { key: 'requests', header: 'Requests', align: 'right', render: (m) => <span className="num">{formatNumber(m.requests)}</span>, sortValue: (m) => m.requests },
-    { key: 'prompt', header: 'Prompt', align: 'right', render: (m) => <span className="num">{formatNumber(m.prompt_tokens)}</span>, sortValue: (m) => m.prompt_tokens },
-    { key: 'completion', header: 'Completion', align: 'right', render: (m) => <span className="num">{formatNumber(m.completion_tokens)}</span>, sortValue: (m) => m.completion_tokens },
-    { key: 'cache', header: 'Cache R', align: 'right', render: (m) => <span className="num text-[var(--chart-6)]">{formatNumber(m.cache_read_tokens)}</span>, sortValue: (m) => m.cache_read_tokens },
-    { key: 'total', header: 'Total', align: 'right', render: (m) => <span className="num font-semibold">{formatNumber(m.total_tokens)}</span>, sortValue: (m) => m.total_tokens },
-    { key: 'cost', header: 'Cost (USD)', align: 'right', render: (m) => <span className="num text-[var(--brand-ink)]">{formatCurrency(m.cost_usd)}</span>, sortValue: (m) => m.cost_usd },
+    { key: 'requests', header: 'Requests', align: 'right', render: (m) => <span className="num tabular-nums">{formatNumber(m.requests)}</span>, sortValue: (m) => m.requests },
+    { key: 'prompt', header: 'Prompt', align: 'right', render: (m) => <span className="num tabular-nums">{formatNumber(m.prompt_tokens)}</span>, sortValue: (m) => m.prompt_tokens },
+    { key: 'completion', header: 'Completion', align: 'right', render: (m) => <span className="num tabular-nums">{formatNumber(m.completion_tokens)}</span>, sortValue: (m) => m.completion_tokens },
+    { key: 'cache', header: 'Cache R', align: 'right', render: (m) => <span className="num tabular-nums text-[var(--text-soft)]">{formatNumber(m.cache_read_tokens)}</span>, sortValue: (m) => m.cache_read_tokens },
+    { key: 'total', header: 'Total', align: 'right', render: (m) => <span className="num tabular-nums font-semibold">{formatNumber(m.total_tokens)}</span>, sortValue: (m) => m.total_tokens },
+    { key: 'cost', header: 'Cost (USD)', align: 'right', render: (m) => <span className="num tabular-nums text-[var(--brand-ink)]">{formatCurrency(m.cost_usd)}</span>, sortValue: (m) => m.cost_usd },
   ]
 
   return (

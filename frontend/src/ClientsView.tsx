@@ -8,16 +8,16 @@ export default function ClientsView({ timeFilter, project }: { timeFilter: strin
   const since = sinceForFilter(timeFilter)
   const { data, isLoading } = useStats(since, project)
 
-  if (isLoading) return <div className="p-5 text-[12px] text-[var(--text-soft)]">Loading…</div>
+  if (isLoading) return <div className="p-5"><div className="h-64 animate-pulse rounded-[var(--radius)] bg-[var(--bg-fill-tertiary)]" /></div>
   if (!data) return null
 
   const columns: Column<ClientRow>[] = [
     { key: 'app', header: 'Client App', render: (c) => <Badge>{c.client_app}</Badge>, sortValue: (c) => c.client_app },
-    { key: 'requests', header: 'Requests', align: 'right', render: (c) => <span className="num">{formatNumber(c.requests)}</span>, sortValue: (c) => c.requests },
-    { key: 'prompt', header: 'Prompt', align: 'right', render: (c) => <span className="num">{formatNumber(c.prompt_tokens)}</span>, sortValue: (c) => c.prompt_tokens },
-    { key: 'completion', header: 'Completion', align: 'right', render: (c) => <span className="num">{formatNumber(c.completion_tokens)}</span>, sortValue: (c) => c.completion_tokens },
-    { key: 'total', header: 'Total Tokens', align: 'right', render: (c) => <span className="num font-semibold">{formatNumber(c.total_tokens)}</span>, sortValue: (c) => c.total_tokens },
-    { key: 'cost', header: 'Cost (USD)', align: 'right', render: (c) => <span className="num text-[var(--brand-ink)]">{formatCurrency(c.cost_usd)}</span>, sortValue: (c) => c.cost_usd },
+    { key: 'requests', header: 'Requests', align: 'right', render: (c) => <span className="num tabular-nums">{formatNumber(c.requests)}</span>, sortValue: (c) => c.requests },
+    { key: 'prompt', header: 'Prompt', align: 'right', render: (c) => <span className="num tabular-nums">{formatNumber(c.prompt_tokens)}</span>, sortValue: (c) => c.prompt_tokens },
+    { key: 'completion', header: 'Completion', align: 'right', render: (c) => <span className="num tabular-nums">{formatNumber(c.completion_tokens)}</span>, sortValue: (c) => c.completion_tokens },
+    { key: 'total', header: 'Total Tokens', align: 'right', render: (c) => <span className="num tabular-nums font-semibold">{formatNumber(c.total_tokens)}</span>, sortValue: (c) => c.total_tokens },
+    { key: 'cost', header: 'Cost (USD)', align: 'right', render: (c) => <span className="num tabular-nums text-[var(--brand-ink)]">{formatCurrency(c.cost_usd)}</span>, sortValue: (c) => c.cost_usd },
   ]
 
   return (

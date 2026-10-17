@@ -57,3 +57,21 @@ html, body {
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: var(--bg-muted); border-radius: 4px; }
 ::-webkit-scrollbar-thumb:hover { background: var(--border-strong); }
+
+/* Table scroll shadow — subtle fade on right edge when overflow */
+.table-scroll {
+  background:
+    linear-gradient(to right, var(--bg-panel) 0%, transparent 8px) left top / 8px 100% no-repeat,
+    linear-gradient(to left, var(--bg-panel) 0%, transparent 8px) right top / 8px 100% no-repeat,
+    linear-gradient(to right, rgba(0,0,0,0.08), transparent) left top / 12px 100% no-repeat,
+    linear-gradient(to left, rgba(0,0,0,0.06), transparent) right top / 12px 100% no-repeat;
+  background-attachment: local, local, scroll, scroll;
+}
+.dark .table-scroll {
+  background:
+    linear-gradient(to right, var(--bg-panel) 0%, transparent 8px) left top / 8px 100% no-repeat,
+    linear-gradient(to left, var(--bg-panel) 0%, transparent 8px) right top / 8px 100% no-repeat,
+    linear-gradient(to right, rgba(255,255,255,0.08), transparent) left top / 12px 100% no-repeat,
+    linear-gradient(to left, rgba(255,255,255,0.05), transparent) right top / 12px 100% no-repeat;
+  background-attachment: local, local, scroll, scroll;
+}
