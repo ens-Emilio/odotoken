@@ -29,9 +29,9 @@ function Kpi({ label, value, sub, color }: { label: string; value: string; sub: 
   )
 }
 
-export default function OverviewView({ timeFilter, project }: { timeFilter: string; project: string }) {
+export default function OverviewView({ timeFilter, project, source }: { timeFilter: string; project: string; source: string }) {
   const since = sinceForFilter(timeFilter)
-  const { data, isLoading, error } = useStats(since, project)
+  const { data, isLoading, error } = useStats(since, project, source)
 
   const pieData = useMemo(() => {
     const src = data?.by_model ?? []
@@ -84,6 +84,9 @@ export default function OverviewView({ timeFilter, project }: { timeFilter: stri
       )}
 
       {/* KPIs — always 5, Saved shows $0.00 when absent */}
+      <div className="flex justify-end">
+        <a href={`/api/stats.csv${since ? `?since=${encodeURIComponent(since)}${source !== 'all' ? `&source=${source}` : ''}${project !== 'all' ? `&project=${project}` : ''}` : source !== 'all' || project !== 'all' ? `?${source !== 'all' ? `source=${source}` : ''}${project !== 'all' ? `${source !== 'all' ? '&' : ''}project=${project}` : ''}` : ''}`} className="rounded-md border border-[var(--border)] bg-[var(--bg-panel)] px-3 py-1.5 text-[11px] font-medium text-[var(--text-muted)] hover:text-[var(--text-strong)]">Export CSV</a>
+      </div>
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-5">
         <Kpi label="Total Spent" value={formatCurrency(summary.total_cost_usd)} sub="estimated USD" color="text-[var(--text-strong)]" />
         <Kpi label="Total Tokens" value={formatNumber(summary.total_tokens)} sub="prompt + completion" color="text-[var(--text-strong)]" />
@@ -170,6 +173,23 @@ export default function OverviewView({ timeFilter, project }: { timeFilter: stri
           />
         </Card>
       </div>
+
+      {/* By Source */}
+      {data.by_source && data.by_source.length > 0 && (
+        <Card>
+          <CardHeader title="By Source" subtitle="proxy vs imported CLI sessions" />
+          <SortableTable
+            rows={data.by_source}
+            rowKey={(s) => s.source}
+            columns={[
+              { key: 'source', header: 'Source', render: (s) => <Badge tone={s.source === 'proxy' ? 'brand' : 'neutral'}>{s.source}</Badge>, sortValue: (s) => s.source },
+              { key: 'requests', header: 'Requests', align: 'right', render: (s) => <span className="num tabular-nums">{formatNumber(s.requests)}</span>, sortValue: (s) => s.requests },
+              { key: 'tokens', header: 'Tokens', align: 'right', render: (s) => <span className="num tabular-nums">{formatNumber(s.total_tokens)}</span>, sortValue: (s) => s.total_tokens },
+              { key: 'cost', header: 'Cost', align: 'right', render: (s) => <span className="num tabular-nums text-[var(--brand-ink)]">{formatCurrency(s.cost_usd)}</span>, sortValue: (s) => s.cost_usd },
+            ]}
+          />
+        </Card>
+      )}
 
       {/* Recent events */}
       <Card>

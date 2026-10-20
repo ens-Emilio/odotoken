@@ -26,11 +26,14 @@ export function formatLatency(ms: number): string {
 }
 
 export function sinceForFilter(filter: string): string | undefined {
-  const now = new Date()
   if (filter === 'today') {
-    return now.toISOString().slice(0, 10) + 'T00:00:00'
+    const d = new Date()
+    const yyyy = d.getFullYear()
+    const mm = String(d.getMonth() + 1).padStart(2, '0')
+    const dd = String(d.getDate()).padStart(2, '0')
+    return `${yyyy}-${mm}-${dd}T00:00:00`
   }
-  if (filter === '7d') return new Date(now.getTime() - 7 * 86400000).toISOString()
-  if (filter === '30d') return new Date(now.getTime() - 30 * 86400000).toISOString()
+  if (filter === '7d') return new Date(Date.now() - 7 * 86400000).toISOString()
+  if (filter === '30d') return new Date(Date.now() - 30 * 86400000).toISOString()
   return undefined
 }

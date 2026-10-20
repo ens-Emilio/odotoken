@@ -31,6 +31,8 @@ console = Console()
 
 app.add_typer(get_count_app(), name="count")
 app.add_typer(get_models_app(), name="models")
+from odotoken.cli.commands.sessions import get_sessions_app
+app.add_typer(get_sessions_app(), name="sessions")
 
 
 DEFAULT_CONFIG_PATH = Path("config.json")
@@ -310,13 +312,12 @@ def stats(
             day_table.add_column("Cost (USD)", justify="right")
             for row in daily:
                 day_table.add_row(
-                    row["date"],
-                    str(row["request_count"]),
-                    f"{row['total_tokens']:,}",
-                    f"${row['total_cost_usd']:.6f}",
+                    row.get("day") or row.get("date") or "",
+                    str(row.get("requests") or row.get("request_count") or 0),
+                    f"{(row.get('total_tokens') or 0):,}",
+                    f"${(row.get('cost_usd') or row.get('total_cost_usd') or 0):.6f}",
                 )
             console.print(day_table)
-
 
 @app.command()
 def log(limit: int = typer.Option(20, "--limit", "-n", help="Number of recent records")):

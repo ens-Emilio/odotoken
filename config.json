@@ -88,5 +88,14 @@
     "redact_logs": true,
     "store_prompts": false,
     "custom_patterns": []
+  },
+  "sessions": {
+    "enabled": true,
+    "paths": {
+      "claude": "~/.claude/projects",
+      "codex": "~/.codex/sessions",
+      "omp": "~/.omp/stats.db",
+      "crush": "~/.local/share/crush/projects.json"
+    }
   }
 }

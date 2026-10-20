@@ -123,6 +123,9 @@ odotoken count chat --file messages.json      # JSON array of messages
 odotoken count batch requests.jsonl
 odotoken models list [--provider X]
 odotoken models info <model-id>
+odotoken sessions scan [--since ISO-DATE]     # read-only: what CLIs exist here
+odotoken sessions import [--dry-run] [--cli omp|claude|codex|crush] [--since ISO-DATE]
+odotoken sessions stats [--since ISO-DATE] [--by-cli] [--by-model] [--by-project]
 ```
 
 ## HTTP API
@@ -169,6 +172,35 @@ Manual overrides: add `"override": true` to any entry and the sync script will n
 ```
 
 The public pricing API needs no auth key for reads (rate limited: 10 req/s per IP at nginx, 60 req/min at the app). Deploy your own instance and point `PEGASUS_PRICING_API` at it if you prefer.
+
+## Importing local CLI sessions
+
+Use odotoken to read the sessions already on this machine (no proxy needed) and price them with `prices.json`:
+
+```bash
+odotoken sessions scan                          # what CLIs/files were found (read-only)
+odotoken sessions import --dry-run              # count tokens + cost without writing
+odotoken sessions import                        # import into SQLite (idempotent, deduped)
+odotoken sessions import --since 2026-10-01     # incremental
+odotoken sessions import --cli omp              # single importer
+odotoken sessions stats --by-cli --by-model     # breakdown by source
+```
+
+Supported CLIs (auto-detected, missing ones are silently skipped):
+
+| CLI | Source | What is read |
+|-----|--------|--------------|
+| OMP | `~/.omp/stats.db` | SQLite `messages` (tokens + `cost_total` cross-checked via `prices.json`) |
+| Claude Code | `~/.claude/projects/**/*.jsonl` | JSONL `type=assistant` → `message.usage` (streaming, one line at a time) |
+| Codex | `~/.codex/sessions/**` + `~/.codex/history.jsonl` + `session_index.json` | `token_usage_record` → `payload.usage` (one record = one turn) |
+| Crush | `~/.local/share/crush/projects.json` → `data_dir/**/*.jsonl` | best-effort JSONL `usage` blocks |
+| Gemini/Antigravity/Amp | `~/.gemini/`, `~/.config/antigravity/`, `~/.config/amp/` | planned via `BaseImporter` — enable in `sessions.enabled=false` until parsers land |
+
+Details:
+- **One pricing source** — every imported row is re-priced with `PricingCalculator` (`prices.json`); original `cost_total` is kept in `metadata`.
+- **Deduplication** — `UNIQUE(source, session_file, entry_id)` — rerunning `import` inserts `0` new rows.
+- **Dashboard** — header **Source** filter (`All sources` / `Proxy` / `Imported` / `import:claude` …), `GET /api/stats?source=proxy|import|import:omp`, `POST /api/sessions/import`, and a `By Source` card on Overview.
+- **Config** — `config.json` → `sessions: {enabled, paths: {claude, codex, omp, crush}}` (absolute or `~` paths). `since` is an ISO-8601 string; the dashboard also passes `since=` alongside `source=`.
 
 ## Configuration reference
 

@@ -24,8 +24,6 @@ export interface ModelRow {
 export interface ClientRow {
   client_app: string
   requests: number
-  prompt_tokens: number
-  completion_tokens: number
   total_tokens: number
   cost_usd: number
 }
@@ -48,7 +46,7 @@ export interface EventRow {
 
 export interface DailyRow {
   day: string
-  request_count: number
+  requests: number
   total_tokens: number
   cost_usd: number
 }
@@ -85,12 +83,19 @@ export interface Savings {
   shadow_usd: number
   saved_usd: number
 }
+export interface SourceRow {
+  source: string
+  requests: number
+  total_tokens: number
+  cost_usd: number
+}
 
 export interface Stats {
   summary: Summary
   by_model: ModelRow[]
   by_client: ClientRow[]
   by_project: ProjectRow[]
+  by_source: SourceRow[]
   savings: Savings
   recent_events: EventRow[]
   daily: DailyRow[]

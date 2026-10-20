@@ -4,9 +4,9 @@ import { Card, CardHeader, Badge } from './ui/Card'
 import { SortableTable, type Column } from './ui/SortableTable'
 import type { ModelRow } from './types'
 
-export default function ModelsView({ timeFilter, project }: { timeFilter: string; project: string }) {
+export default function ModelsView({ timeFilter, project, source }: { timeFilter: string; project: string; source: string }) {
   const since = sinceForFilter(timeFilter)
-  const { data, isLoading } = useStats(since, project)
+  const { data, isLoading } = useStats(since, project, source)
 
   if (isLoading) return <div className="p-5"><div className="h-64 animate-pulse rounded-[var(--radius)] bg-[var(--bg-fill-tertiary)]" /></div>
   if (!data) return null
@@ -29,7 +29,7 @@ export default function ModelsView({ timeFilter, project }: { timeFilter: string
           title="Model Breakdown"
           subtitle={`${data.by_model.length} models seen in this period · click headers to sort`}
         />
-        <SortableTable rows={data.by_model} rowKey={(m) => m.model + m.provider} columns={columns} pageSize={25} />
+        <SortableTable rows={data.by_model} rowKey={(m) => m.model + m.provider} columns={columns} pageSize={25} searchable searchKeys={['model','provider']} />
       </Card>
     </div>
   )

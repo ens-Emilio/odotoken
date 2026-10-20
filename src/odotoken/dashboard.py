@@ -372,22 +372,35 @@ def register_dashboard_routes(app: FastAPI, db: Database, guard: Guard | None = 
         async def root_view():
             return FileResponse(str(static_dir / "index.html"))
 
-    @app.get("/api/stats")
-    async def stats_api(since: str | None = None, project: str | None = None):
-        summary = db.get_summary(since=since, project=project)
-        by_model = db.get_summary_by_model(since=since, project=project)
-        by_client = db.get_summary_by_client(since=since, project=project)
-        by_project = db.get_summary_by_project(since=since)
-        recent_events = db.get_recent_events(limit=50, project=project)
-        daily = db.get_daily_usage(days=30)
-        savings = {
-            "actual_usd": summary.get("total_cost_usd", 0.0),
-            "shadow_usd": summary.get("total_shadow_cost_usd", 0.0),
-            "saved_usd": max(
-                0.0, summary.get("total_shadow_cost_usd", 0.0) - summary.get("total_cost_usd", 0.0)
-            ),
-        }
+    @app.get("/api/config")
+    async def config_api():
+        """Exposed subset of config.json for dashboard."""
+        import json as _jc
+        from pathlib import Path as _Pc
+        cfg = {}
+        for cand in [_Pc("config.json"), _Pc(__file__).parent.parent.parent.parent / "config.json"]:
+            if cand.exists():
+                try:
+                    cfg = _jc.loads(cand.read_text()); break
+                except Exception:
+                    pass
+        providers = sorted((cfg.get("providers") or {}).keys())
+        sessions = cfg.get("sessions") or {}
+        guard_cfg = cfg.get("limits") or {}
+        return JSONResponse({"providers": providers, "sessions": sessions, "limits": guard_cfg})
 
+    @app.get("/api/stats")
+    async def stats_api(since: str | None = None, project: str | None = None, source: str | None = None, group_by: str | None = None):
+        summary = db.get_summary(since=since, project=project, source=source)
+        by_model = db.get_summary_by_model(since=since, project=project, source=source)
+        by_client = db.get_summary_by_client(since=since, project=project, source=source)
+        by_project = db.get_summary_by_project(since=since, source=source)
+        by_source = db.get_summary_by_source(since=since, project=project)
+        recent_events = db.get_recent_events(limit=50, since=since, project=project, source=source)
+        daily_grouped = None
+        if group_by == "source":
+            daily_grouped = db.get_daily_usage_grouped(days=30, since=since)
+        daily = daily_grouped if daily_grouped is not None else db.get_daily_usage(days=30, since=since, source=source)
         guard_info = {}
         if guard:
             check = guard.check_allowance()
@@ -409,11 +422,16 @@ def register_dashboard_routes(app: FastAPI, db: Database, guard: Guard | None = 
                     "monthly_tokens": check.current_monthly_tokens,
                 },
             }
-
         # Drop noise rows (no model name and no usage: favicon 404s, failed
         # connections) so dashboard tables stay clean.
         by_model = [m for m in by_model if m.get("model") or m.get("total_tokens")]
         by_client = [c for c in by_client if c.get("total_tokens") or c.get("requests")]
+
+        savings = {
+            "actual_usd": summary.get("total_cost_usd", 0.0),
+            "shadow_usd": summary.get("total_shadow_cost_usd", 0.0),
+            "saved_usd": max(0.0, summary.get("total_shadow_cost_usd", 0.0) - summary.get("total_cost_usd", 0.0)),
+        }
 
         return JSONResponse(
             {
@@ -424,9 +442,100 @@ def register_dashboard_routes(app: FastAPI, db: Database, guard: Guard | None = 
                 "savings": savings,
                 "recent_events": recent_events,
                 "daily": daily,
+                "by_source": by_source,
                 "guard": guard_info,
             }
         )
+    @app.patch("/api/guard/limits")
+    async def patch_limits(body: dict):
+        import json as _jg
+        from pathlib import Path as _Pg
+        cfg_path = None
+        for cand in [_Pg("config.json"), _Pg(__file__).parent.parent.parent.parent / "config.json"]:
+            if cand.exists():
+                cfg_path = cand; break
+        if not cfg_path:
+            cfg_path = _Pg("config.json")
+        cfg: dict = {}
+        if cfg_path.exists():
+            try:
+                cfg = _jg.loads(cfg_path.read_text())
+            except Exception:
+                cfg = {}
+        limits = cfg.get("limits") or {}
+        for k in ["daily_cost_limit_usd","monthly_cost_limit_usd","daily_tokens_limit","monthly_tokens_limit","action_on_breach","webhook_url"]:
+            if k in body:
+                limits[k] = body[k]
+        cfg["limits"] = limits
+        cfg_path.write_text(_jg.dumps(cfg, indent=2) + "\n")
+        if guard:
+            from odotoken.guard import GuardLimits
+            guard.update_limits(GuardLimits(
+                daily_cost_limit_usd=limits.get("daily_cost_limit_usd"),
+                monthly_cost_limit_usd=limits.get("monthly_cost_limit_usd"),
+                daily_tokens_limit=limits.get("daily_tokens_limit"),
+                monthly_tokens_limit=limits.get("monthly_tokens_limit"),
+                action_on_breach=limits.get("action_on_breach") or "alert",
+                webhook_url=limits.get("webhook_url"),
+            ))
+        # webhook on manual breach check
+        if guard and limits.get("webhook_url"):
+            try:
+                import httpx
+                check = guard.check_allowance()
+                if check.status in ("warning","breached"):
+                    httpx.post(limits["webhook_url"], json={"status": check.status, "reason": check.reason, "daily_cost": check.current_daily_cost}, timeout=3)
+            except Exception:
+                pass
+        return JSONResponse({"limits": limits})
+        return JSONResponse({"limits": limits})
+
+    @app.get("/api/stats.csv")
+    async def stats_csv(since: str | None = None, project: str | None = None, source: str | None = None):
+        import csv, io
+        rows = db.get_recent_events(limit=5000, since=since, project=project, source=source)
+        buf = io.StringIO()
+        w = csv.DictWriter(buf, fieldnames=["id","timestamp","provider","model","client_app","prompt_tokens","completion_tokens","total_tokens","cost_usd","latency_ms","source"])
+        w.writeheader()
+        for r in rows:
+            w.writerow({k: r.get(k,"") for k in ["id","timestamp","provider","model","client_app","prompt_tokens","completion_tokens","total_tokens","cost_usd","latency_ms","source"]})
+        from fastapi.responses import PlainTextResponse
+        return PlainTextResponse(buf.getvalue(), media_type="text/csv", headers={"Content-Disposition": "attachment; filename=odotoken.csv"})
+
+
+    @app.post("/api/sessions/import")
+    async def sessions_import(since: str | None = None, dry_run: bool = False):
+        """Trigger import of local CLI sessions. Synchronous, returns stats."""
+        import json as _json
+        from pathlib import Path as _Path
+        from odotoken.pricing import PricingCalculator as _PC
+        from odotoken.importers.service import import_sessions as _import
+        cfg = {}
+        for cand in [_Path("config.json"), _Path(__file__).parent.parent.parent.parent / "config.json"]:
+            if cand.exists():
+                try:
+                    cfg = _json.loads(cand.read_text()); break
+                except Exception:
+                    pass
+        pricing = _PC(_Path("prices.json") if _Path("prices.json").exists() else "prices.json")
+        stats = _import(db, pricing, config=cfg, since=since, dry_run=dry_run)
+        return JSONResponse({"scanned": stats.scanned, "inserted": stats.inserted, "skipped_dup": stats.skipped_dup, "cost_usd": stats.cost_usd, "by_cli": stats.by_cli, "dry_run": dry_run})
+
+    @app.get("/api/sessions/scan")
+    async def sessions_scan():
+        import json as _json2
+        from pathlib import Path as _Path2
+        from odotoken.importers.registry import scan_all as _scan
+        cfg2 = {}
+        for cand in [_Path2("config.json"), _Path2(__file__).parent.parent.parent.parent / "config.json"]:
+            if cand.exists():
+                try:
+                    cfg2 = _json2.loads(cand.read_text())
+                    break
+                except Exception:
+                    pass
+        results = _scan(cfg2)
+        return JSONResponse([r.__dict__ for r in results])
 
     # Move catch-all wildcard routes to the end so /dashboard and /api/stats are matched first
     app.router.routes.sort(key=lambda r: 1 if "{" in getattr(r, "path", "") else 0)

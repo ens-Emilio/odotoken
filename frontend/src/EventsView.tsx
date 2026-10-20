@@ -6,9 +6,9 @@ import { SortableTable, type Column } from './ui/SortableTable'
 import { Dialog } from './ui/Dialog'
 import type { EventRow } from './types'
 
-export default function EventsView({ timeFilter, project }: { timeFilter: string; project: string }) {
+export default function EventsView({ timeFilter, project, source }: { timeFilter: string; project: string; source: string }) {
   const since = sinceForFilter(timeFilter)
-  const { data, isLoading } = useStats(since, project)
+  const { data, isLoading } = useStats(since, project, source)
   const [selected, setSelected] = useState<EventRow | null>(null)
 
   if (isLoading) return <div className="p-5"><div className="h-64 animate-pulse rounded-[var(--radius)] bg-[var(--bg-fill-tertiary)]" /></div>
@@ -40,6 +40,7 @@ export default function EventsView({ timeFilter, project }: { timeFilter: string
           rowKey={(e) => e.id}
           columns={columns}
           pageSize={25}
+          searchable searchKeys={['model','provider','client_app']}
           onRowClick={setSelected}
           activeRowKey={selected?.id}
         />

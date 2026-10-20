@@ -60,19 +60,19 @@ export function Sidebar({ view, onView, guardBreached, open, onToggle }: { view:
             <div className="space-y-0.5">
               {group.ids.map((v) => (
                 <button
-                  key={v}
+                  aria-current={view === v ? 'page' : undefined}
+                  aria-label={VIEW_META[v].label}
                   onClick={() => {
                     onView(v)
                     if (window.innerWidth < 768 && open) onToggle()
                   }}
                   title={VIEW_META[v].label}
-                  className={`relative flex w-full items-center gap-2.5 rounded-md px-2.5 py-2 text-[12px] font-medium transition-colors ${
+                  className={`relative flex w-full items-center gap-2.5 rounded-md px-2.5 py-2 text-[12px] font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-[var(--brand)] focus:ring-offset-0 ${
                     view === v
                       ? 'bg-[var(--bg-fill-secondary)] text-[var(--text-strong)]'
                       : 'text-[var(--text-muted)] hover:bg-[var(--bg-fill-tertiary)] hover:text-[var(--text-strong)]'
                   }`}
                 >
-                  {view === v && <span className="absolute inset-y-1 left-0 w-0.5 rounded-full bg-[var(--brand-ink)] dark:bg-[var(--brand)]" aria-hidden />}
                   <ViewIcon id={v} active={view === v} />
                   {open && <span className="truncate">{VIEW_META[v].label}</span>}
                   {v === 'guard' && guardBreached && (
@@ -86,9 +86,10 @@ export function Sidebar({ view, onView, guardBreached, open, onToggle }: { view:
       </nav>
 
       <button
-        className="flex items-center gap-2 rounded-md px-3 py-3 text-[var(--text-soft)] hover:bg-[var(--bg-fill-tertiary)] hover:text-[var(--text-strong)]"
+        className="flex items-center gap-2 rounded-md px-3 py-3 text-[var(--text-soft)] hover:bg-[var(--bg-fill-tertiary)] hover:text-[var(--text-strong)] focus:outline-none focus:ring-2 focus:ring-[var(--brand)]"
         onClick={onToggle}
         aria-label={open ? 'Collapse sidebar' : 'Expand sidebar'}
+        aria-expanded={open}
       >
         {open ? <PanelLeftClose className="h-4 w-4" /> : <PanelLeftOpen className="h-4 w-4" />}
         {open && <span className="text-[11px]">Collapse</span>}

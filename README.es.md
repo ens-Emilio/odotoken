@@ -123,6 +123,9 @@ odotoken count chat --file mensajes.json      # array JSON de mensajes
 odotoken count batch requests.jsonl
 odotoken models list [--provider X]
 odotoken models info <id-de-modelo>
+odotoken sessions scan [--since ISO-DATE]
+odotoken sessions import [--dry-run] [--cli omp|claude|codex|crush] [--since ISO-DATE]
+odotoken sessions stats [--since ISO-DATE] [--by-cli] [--by-model] [--by-project]
 ```
 
 ## API HTTP
@@ -169,6 +172,28 @@ Overrides manuales: agrega `"override": true` en cualquier entrada y el script d
 ```
 
 La API pública de precios no necesita clave para lecturas (rate limit: 10 req/s por IP en nginx, 60 req/min en la app). Despliega tu propia instancia y apunta `PEGASUS_PRICING_API` a ella si lo prefieres.
+
+## Importando sesiones locales
+
+Usa odotoken para leer sesiones ya guardadas en la máquina (sin proxy) y tarificar con `prices.json`:
+
+```bash
+odotoken sessions scan
+odotoken sessions import --dry-run
+odotoken sessions import
+odotoken sessions import --since 2026-10-01
+```
+
+| CLI | Origen | Qué se lee |
+|-----|--------|-----------|
+| OMP | `~/.omp/stats.db` | SQLite `messages` |
+| Claude Code | `~/.claude/projects/**/*.jsonl` | JSONL `type=assistant` |
+| Codex | `~/.codex/sessions/**` | `token_usage_record` |
+| Crush | `~/.local/share/crush/projects.json` | JSONL `usage` |
+
+- Precio único vía `PricingCalculator`.
+- Dedup `UNIQUE(source, session_file, entry_id)`.
+- Dashboard: filtro **Source**, `GET /api/stats?source=...`, `POST /api/sessions/import`.
 
 ## Referencia de configuración
 

@@ -4,9 +4,9 @@ import { Card, CardHeader, Badge } from './ui/Card'
 import { SortableTable, type Column } from './ui/SortableTable'
 import type { ClientRow } from './types'
 
-export default function ClientsView({ timeFilter, project }: { timeFilter: string; project: string }) {
+export default function ClientsView({ timeFilter, project, source }: { timeFilter: string; project: string; source: string }) {
   const since = sinceForFilter(timeFilter)
-  const { data, isLoading } = useStats(since, project)
+  const { data, isLoading } = useStats(since, project, source)
 
   if (isLoading) return <div className="p-5"><div className="h-64 animate-pulse rounded-[var(--radius)] bg-[var(--bg-fill-tertiary)]" /></div>
   if (!data) return null
@@ -14,8 +14,6 @@ export default function ClientsView({ timeFilter, project }: { timeFilter: strin
   const columns: Column<ClientRow>[] = [
     { key: 'app', header: 'Client App', render: (c) => <Badge>{c.client_app}</Badge>, sortValue: (c) => c.client_app },
     { key: 'requests', header: 'Requests', align: 'right', render: (c) => <span className="num tabular-nums">{formatNumber(c.requests)}</span>, sortValue: (c) => c.requests },
-    { key: 'prompt', header: 'Prompt', align: 'right', render: (c) => <span className="num tabular-nums">{formatNumber(c.prompt_tokens)}</span>, sortValue: (c) => c.prompt_tokens },
-    { key: 'completion', header: 'Completion', align: 'right', render: (c) => <span className="num tabular-nums">{formatNumber(c.completion_tokens)}</span>, sortValue: (c) => c.completion_tokens },
     { key: 'total', header: 'Total Tokens', align: 'right', render: (c) => <span className="num tabular-nums font-semibold">{formatNumber(c.total_tokens)}</span>, sortValue: (c) => c.total_tokens },
     { key: 'cost', header: 'Cost (USD)', align: 'right', render: (c) => <span className="num tabular-nums text-[var(--brand-ink)]">{formatCurrency(c.cost_usd)}</span>, sortValue: (c) => c.cost_usd },
   ]
@@ -27,7 +25,7 @@ export default function ClientsView({ timeFilter, project }: { timeFilter: strin
           title="Usage by Client App"
           subtitle={`${data.by_client.length} CLI agents seen · claude-cli, crush, opencode, omp…`}
         />
-        <SortableTable rows={data.by_client} rowKey={(c) => c.client_app} columns={columns} pageSize={25} />
+        <SortableTable rows={data.by_client} rowKey={(c) => c.client_app} columns={columns} pageSize={25} searchable searchKeys={['client_app']} />
       </Card>
     </div>
   )

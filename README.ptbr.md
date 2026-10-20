@@ -123,6 +123,9 @@ odotoken count chat --file mensagens.json     # array JSON de mensagens
 odotoken count batch requests.jsonl
 odotoken models list [--provider X]
 odotoken models info <id-do-modelo>
+odotoken sessions scan [--since DATA-ISO]     # somente leitura: quais CLIs existem aqui
+odotoken sessions import [--dry-run] [--cli omp|claude|codex|crush] [--since DATA-ISO]
+odotoken sessions stats [--since DATA-ISO] [--by-cli] [--by-model] [--by-project]
 ```
 
 ## API HTTP
@@ -169,6 +172,29 @@ Overrides manuais: adicione `"override": true` em qualquer entrada e o script de
 ```
 
 A API pública de preços não precisa de chave para leitura (rate limit: 10 req/s por IP no nginx, 60 req/min no app). Faça deploy da sua própria instância e aponte `PEGASUS_PRICING_API` para ela se preferir.
+
+## Importando sessões locais
+
+Use o odotoken para ler sessões já salvas na máquina (sem precisar do proxy) e precificar via `prices.json`:
+
+```bash
+odotoken sessions scan                        # quais CLIs/arquivos foram encontrados (somente leitura)
+odotoken sessions import --dry-run            # conta tokens + custo sem gravar
+odotoken sessions import                      # importa no SQLite (idempotente, com dedup)
+odotoken sessions import --since 2026-10-01   # incremental
+odotoken sessions stats --by-cli --by-model   # breakdown por origem
+```
+
+| CLI | Origem | O que é lido |
+|-----|--------|--------------|
+| OMP | `~/.omp/stats.db` | SQLite `messages` |
+| Claude Code | `~/.claude/projects/**/*.jsonl` | JSONL `type=assistant` → `message.usage` |
+| Codex | `~/.codex/sessions/**` | `token_usage_record` → `payload.usage` |
+| Crush | `~/.local/share/crush/projects.json` → `data_dir/**/*.jsonl` | JSONL `usage` (best-effort) |
+
+- **Preço único** — toda linha importada é recalculada pelo `PricingCalculator` (`prices.json`).
+- **Dedup** — `UNIQUE(source, session_file, entry_id)`; reexecutar `import` insere `0`.
+- **Dashboard** — filtro **Source** no header, `GET /api/stats?source=...`, `POST /api/sessions/import` e card **By Source**.
 
 ## Referência de configuração
 

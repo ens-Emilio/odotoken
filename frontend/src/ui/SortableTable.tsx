@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { ArrowDown, ArrowUp, ChevronsUpDown } from 'lucide-react'
 
 export interface Column<T> {
@@ -10,31 +10,44 @@ export interface Column<T> {
   width?: string
 }
 
-export function SortableTable<T>({ rows, columns, pageSize = 25, rowKey, onRowClick, activeRowKey }: {
+export function SortableTable<T>({ rows, columns, pageSize = 25, rowKey, onRowClick, activeRowKey, searchable, searchKeys }: {
   rows: T[]
   columns: Column<T>[]
   pageSize?: number
   rowKey: (row: T) => string | number
   onRowClick?: (row: T) => void
   activeRowKey?: string | number
+  searchable?: boolean
+  searchKeys?: (keyof T)[]
 }) {
+  const [filter, setFilter] = useState('')
+  const filtered = useMemo(() => {
+    if (!filter || !searchKeys?.length) return rows
+    const q = filter.toLowerCase()
+    return rows.filter((r) => searchKeys.some((k) => String(r[k] ?? '').toLowerCase().includes(q)))
+  }, [rows, filter, searchKeys])
   const [sortKey, setSortKey] = useState<string | null>(null)
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc')
   const [page, setPage] = useState(0)
+  useEffect(() => {
+    const maxPage = Math.max(0, Math.ceil(filtered.length / pageSize) - 1)
+    if (page > maxPage) setPage(0)
+  }, [filtered.length, pageSize, page])
+  useEffect(() => { setPage(0) }, [sortKey, sortDir, filter])
 
   const sorted = useMemo(() => {
-    if (!sortKey) return rows
+    if (!sortKey) return filtered
     const col = columns.find((c) => c.key === sortKey)
-    if (!col?.sortValue) return rows
-    const copy = [...rows]
+    if (!col?.sortValue) return filtered
+    const copy = [...filtered]
     copy.sort((a, b) => {
       const av = col.sortValue!(a)
       const bv = col.sortValue!(b)
       if (typeof av === 'number' && typeof bv === 'number') return sortDir === 'asc' ? av - bv : bv - av
-      return sortDir === 'asc' ? String(av).localeCompare(String(bv)) : String(bv).localeCompare(String(av)) * -1
+      return sortDir === 'asc' ? String(av).localeCompare(String(bv)) : String(bv).localeCompare(String(av))
     })
     return copy
-  }, [rows, sortKey, sortDir, columns])
+  }, [filtered, sortKey, sortDir, columns])
 
   const pageCount = Math.max(1, Math.ceil(sorted.length / pageSize))
   const safePage = Math.min(page, pageCount - 1)
@@ -51,6 +64,13 @@ export function SortableTable<T>({ rows, columns, pageSize = 25, rowKey, onRowCl
 
   return (
     <div>
+      {searchable && searchKeys?.length ? (
+        <div className="flex items-center gap-2 px-3 py-2 border-b border-[var(--border-soft)]">
+          <input value={filter} onChange={(e) => setFilter(e.target.value)} placeholder="Filter…" aria-label="Filter table" className="w-full max-w-xs rounded-md border border-[var(--border)] bg-[var(--bg)] px-2.5 py-1.5 text-[12px] placeholder:text-[var(--text-faint)] focus:outline-none focus:ring-2 focus:ring-[var(--brand)]" />
+          {filter && <button onClick={() => setFilter('')} className="text-[11px] text-[var(--text-soft)] hover:text-[var(--text-strong)]">Clear</button>}
+          <span className="ml-auto text-[11px] text-[var(--text-faint)]">{filtered.length !== rows.length ? `${filtered.length}/${rows.length} rows` : `${rows.length} rows`}</span>
+        </div>
+      ) : null}
       <div className="table-scroll overflow-x-auto">
         <table className="w-full text-left text-[12px]">
           <thead>

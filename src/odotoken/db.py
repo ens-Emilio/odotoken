@@ -31,6 +31,10 @@ class TokenEvent:
     status_code: int = 200
     project_id: str = "default"  # from X-Odo-Project header
     metadata: str = "{}"  # JSON string for extra fields
+    source: str = "proxy"  # proxy | import:claude | import:codex | import:omp | import:crush
+    session_id: str = ""  # original session id from CLI
+    session_file: str = ""  # source file path
+    entry_id: str = ""  # unique entry id inside session
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -88,7 +92,45 @@ class Database:
                 )
             if "shadow_cost" not in cols:
                 conn.execute("ALTER TABLE token_events ADD COLUMN shadow_cost REAL NOT NULL DEFAULT 0.0;")
+            if "source" not in cols:
+                conn.execute("ALTER TABLE token_events ADD COLUMN source TEXT NOT NULL DEFAULT 'proxy';")
+            if "session_id" not in cols:
+                conn.execute("ALTER TABLE token_events ADD COLUMN session_id TEXT NOT NULL DEFAULT '';")
+            if "session_file" not in cols:
+                conn.execute("ALTER TABLE token_events ADD COLUMN session_file TEXT NOT NULL DEFAULT '';")
+            if "entry_id" not in cols:
+                conn.execute("ALTER TABLE token_events ADD COLUMN entry_id TEXT NOT NULL DEFAULT '';")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_token_events_project ON token_events(project_id);")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_token_events_source ON token_events(source);")
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_token_events_source_entry ON token_events(source, session_file, entry_id);"
+            )
+            # Dedup: unique where entry_id != '' (imports); proxy rows keep '' and can duplicate
+            # Use a unique index with WHERE entry_id != '' (partial index)
+            conn.execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS uq_token_events_import ON token_events(source, session_file, entry_id) WHERE entry_id != '';"
+            )
+            # Import offsets for incremental JSONL scans
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS import_offsets (
+                    session_file TEXT PRIMARY KEY,
+                    offset INTEGER NOT NULL DEFAULT 0,
+                    mtime INTEGER NOT NULL DEFAULT 0
+                );
+                """
+            )
+            # Seen entries for OMP-style SQLite imports (alternative dedup tracking)
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS import_seen (
+                    source TEXT NOT NULL,
+                    session_file TEXT NOT NULL,
+                    entry_id TEXT NOT NULL,
+                    PRIMARY KEY (source, session_file, entry_id)
+                );
+                """
+            )
             conn.commit()
 
     def record_event(self, event: TokenEvent) -> int:
@@ -106,8 +148,8 @@ class Database:
                     prompt_tokens, completion_tokens, total_tokens,
                     cache_read_tokens, cache_write_tokens,
                     cost_usd, shadow_cost, latency_ms, status_code,
-                    project_id, metadata
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    project_id, metadata, source, session_id, session_file, entry_id
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     event.timestamp,
@@ -125,13 +167,76 @@ class Database:
                     event.status_code,
                     event.project_id,
                     event.metadata,
+                    event.source,
+                    event.session_id,
+                    event.session_file,
+                    event.entry_id,
                 ),
             )
             conn.commit()
             return cur.lastrowid or 0
 
-    def get_summary(self, since: str | None = None, project: str | None = None) -> dict[str, Any]:
-        """Aggregate totals, optionally filtered by ISO 'since' and/or project tag."""
+    def record_events_ignore_dup(self, events: list[TokenEvent]) -> tuple[int, int]:
+        """Bulk insert, dedup via UNIQUE index. Returns (inserted, skipped). Single transaction."""
+        if not events:
+            return 0, 0
+        for e in events:
+            if not e.timestamp:
+                e.timestamp = datetime.now(UTC).isoformat()
+            if not e.total_tokens:
+                e.total_tokens = e.prompt_tokens + e.completion_tokens
+        rows = [
+            (
+                e.timestamp, e.provider, e.model, e.client_app,
+                e.prompt_tokens, e.completion_tokens, e.total_tokens,
+                e.cache_read_tokens, e.cache_write_tokens,
+                e.cost_usd, e.shadow_cost, e.latency_ms, e.status_code,
+                e.project_id, e.metadata, e.source, e.session_id, e.session_file, e.entry_id,
+            )
+            for e in events
+        ]
+        with self.connection() as conn:
+            cur = conn.cursor()
+            before = conn.total_changes
+            cur.executemany(
+                """
+                INSERT OR IGNORE INTO token_events (
+                    timestamp, provider, model, client_app,
+                    prompt_tokens, completion_tokens, total_tokens,
+                    cache_read_tokens, cache_write_tokens,
+                    cost_usd, shadow_cost, latency_ms, status_code,
+                    project_id, metadata, source, session_id, session_file, entry_id
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                rows,
+            )
+            inserted = conn.total_changes - before
+            seen_rows = [(e.source, e.session_file, e.entry_id) for e in events if e.entry_id]
+            if seen_rows:
+                cur.executemany(
+                    "INSERT OR IGNORE INTO import_seen (source, session_file, entry_id) VALUES (?, ?, ?)",
+                    seen_rows,
+                )
+            conn.commit()
+            skipped = len(events) - inserted
+            return inserted, skipped
+
+
+    def _source_filter(self, source: str | None) -> tuple[str, list[Any]]:
+        if not source or source == "all":
+            return "", []
+        if source.startswith("import:"):
+            return "source = ?", [source]
+        if source == "proxy":
+            return "source = ?", ["proxy"]
+        if source == "import":
+            return "source LIKE ?", ["import:%"]
+        return "source = ?", [source]
+
+    def get_summary(
+        self, since: str | None = None, project: str | None = None, source: str | None = None
+    ) -> dict[str, Any]:
+        """Aggregate totals, optionally filtered by ISO 'since' and/or project tag and/or source."""
         query = """
             SELECT
                 COUNT(*) as total_requests,
@@ -148,11 +253,16 @@ class Database:
         params: list[Any] = []
         conds = []
         if since:
-            conds.append("timestamp >= ?")
+            conds.append("datetime(timestamp) >= datetime(?)")
             params.append(since)
         if project:
             conds.append("project_id = ?")
             params.append(project)
+        if source and source != "all":
+            sf, sp = self._source_filter(source)
+            if sf:
+                conds.append(sf)
+                params.extend(sp)
         if conds:
             query += " WHERE " + " AND ".join(conds)
 
@@ -163,7 +273,7 @@ class Database:
             return dict(row)
 
     def get_summary_by_model(
-        self, since: str | None = None, project: str | None = None
+        self, since: str | None = None, project: str | None = None, source: str | None = None
     ) -> list[dict[str, Any]]:
         query = """
             SELECT
@@ -181,11 +291,16 @@ class Database:
         params: list[Any] = []
         conds = []
         if since:
-            conds.append("timestamp >= ?")
+            conds.append("datetime(timestamp) >= datetime(?)")
             params.append(since)
         if project:
             conds.append("project_id = ?")
             params.append(project)
+        if source and source != "all":
+            sf, sp = self._source_filter(source)
+            if sf:
+                conds.append(sf)
+                params.extend(sp)
         if conds:
             query += " WHERE " + " AND ".join(conds)
         query += " GROUP BY model ORDER BY cost_usd DESC"
@@ -195,7 +310,7 @@ class Database:
             return [dict(r) for r in rows]
 
     def get_summary_by_client(
-        self, since: str | None = None, project: str | None = None
+        self, since: str | None = None, project: str | None = None, source: str | None = None
     ) -> list[dict[str, Any]]:
         query = """
             SELECT
@@ -208,11 +323,16 @@ class Database:
         params: list[Any] = []
         conds = []
         if since:
-            conds.append("timestamp >= ?")
+            conds.append("datetime(timestamp) >= datetime(?)")
             params.append(since)
         if project:
             conds.append("project_id = ?")
             params.append(project)
+        if source and source != "all":
+            sf, sp = self._source_filter(source)
+            if sf:
+                conds.append(sf)
+                params.extend(sp)
         if conds:
             query += " WHERE " + " AND ".join(conds)
         query += " GROUP BY client_app ORDER BY cost_usd DESC"
@@ -221,7 +341,35 @@ class Database:
             rows = conn.execute(query, params).fetchall()
             return [dict(r) for r in rows]
 
-    def get_summary_by_project(self, since: str | None = None) -> list[dict[str, Any]]:
+    def get_summary_by_source(
+        self, since: str | None = None, project: str | None = None
+    ) -> list[dict[str, Any]]:
+        query = """
+            SELECT
+                source,
+                COUNT(*) as requests,
+                SUM(prompt_tokens) as prompt_tokens,
+                SUM(completion_tokens) as completion_tokens,
+                SUM(total_tokens) as total_tokens,
+                SUM(cost_usd) as cost_usd
+            FROM token_events
+        """
+        params: list[Any] = []
+        conds = []
+        if since:
+            conds.append("datetime(timestamp) >= datetime(?)")
+            params.append(since)
+        if project:
+            conds.append("project_id = ?")
+            params.append(project)
+        if conds:
+            query += " WHERE " + " AND ".join(conds)
+        query += " GROUP BY source ORDER BY cost_usd DESC"
+        with self.connection() as conn:
+            rows = conn.execute(query, params).fetchall()
+            return [dict(r) for r in rows]
+
+    def get_summary_by_project(self, since: str | None = None, source: str | None = None) -> list[dict[str, Any]]:
         query = """
             SELECT
                 project_id,
@@ -232,9 +380,17 @@ class Database:
             FROM token_events
         """
         params: list[Any] = []
+        conds = []
         if since:
-            query += " WHERE timestamp >= ?"
+            conds.append("datetime(timestamp) >= datetime(?)")
             params.append(since)
+        if source and source != "all":
+            sf, sp = self._source_filter(source)
+            if sf:
+                conds.append(sf)
+                params.extend(sp)
+        if conds:
+            query += " WHERE " + " AND ".join(conds)
         query += " GROUP BY project_id ORDER BY cost_usd DESC"
 
         with self.connection() as conn:
@@ -242,17 +398,22 @@ class Database:
             return [dict(r) for r in rows]
 
     def get_recent_events(
-        self, limit: int = 50, since: str | None = None, project: str | None = None
+        self, limit: int = 50, since: str | None = None, project: str | None = None, source: str | None = None
     ) -> list[dict[str, Any]]:
         query = "SELECT * FROM token_events"
         params: list[Any] = []
         conds = []
         if since:
-            conds.append("timestamp >= ?")
+            conds.append("datetime(timestamp) >= datetime(?)")
             params.append(since)
         if project:
             conds.append("project_id = ?")
             params.append(project)
+        if source and source != "all":
+            sf, sp = self._source_filter(source)
+            if sf:
+                conds.append(sf)
+                params.extend(sp)
         if conds:
             query += " WHERE " + " AND ".join(conds)
         query += " ORDER BY id DESC LIMIT ?"
@@ -261,7 +422,7 @@ class Database:
             rows = conn.execute(query, params).fetchall()
             return [dict(r) for r in rows]
 
-    def get_daily_usage(self, days: int = 30) -> list[dict[str, Any]]:
+    def get_daily_usage(self, days: int = 30, since: str | None = None, source: str | None = None) -> list[dict[str, Any]]:
         query = """
             SELECT
                 substr(timestamp, 1, 10) as day,
@@ -269,10 +430,53 @@ class Database:
                 SUM(total_tokens) as total_tokens,
                 SUM(cost_usd) as cost_usd
             FROM token_events
-            WHERE timestamp >= datetime('now', '-' || ? || ' days')
-            GROUP BY day
-            ORDER BY day ASC
+            WHERE 1=1
         """
+        params: list[Any] = []
+        if since:
+            query += " AND datetime(timestamp) >= datetime(?)"
+            params.append(since)
+        else:
+            query += " AND timestamp >= datetime('now', '-' || ? || ' days')"
+            params.append(days)
+        if source and source != "all":
+            sf, sp = self._source_filter(source)
+            if sf:
+                query += f" AND {sf}"
+                params.extend(sp)
+        query += " GROUP BY day ORDER BY day ASC"
         with self.connection() as conn:
-            rows = conn.execute(query, (days,)).fetchall()
+            rows = conn.execute(query, params).fetchall()
             return [dict(r) for r in rows]
+    def get_daily_usage_grouped(self, days: int = 30, since: str | None = None) -> list[dict[str, Any]]:
+        """Daily usage pivoted by source (proxy vs import:*). Returns {day, source, requests, ...} rows."""
+        query = """
+            SELECT substr(timestamp,1,10) as day, source, COUNT(*) as requests, SUM(total_tokens) as total_tokens, SUM(cost_usd) as cost_usd
+            FROM token_events WHERE 1=1
+        """
+        params: list[Any] = []
+        if since:
+            query += " AND datetime(timestamp) >= datetime(?)"; params.append(since)
+        else:
+            query += " AND timestamp >= datetime('now','-' || ? || ' days')"; params.append(days)
+        query += " GROUP BY day, source ORDER BY day ASC, source ASC"
+        with self.connection() as conn:
+            return [dict(r) for r in conn.execute(query, params).fetchall()]
+
+    # import offsets helpers
+    def get_import_offset(self, session_file: str) -> tuple[int, int]:
+        with self.connection() as conn:
+            row = conn.execute(
+                "SELECT offset, mtime FROM import_offsets WHERE session_file=?", (session_file,)
+            ).fetchone()
+            if row:
+                return int(row["offset"]), int(row["mtime"])
+            return 0, 0
+
+    def set_import_offset(self, session_file: str, offset: int, mtime: int) -> None:
+        with self.connection() as conn:
+            conn.execute(
+                "INSERT OR REPLACE INTO import_offsets (session_file, offset, mtime) VALUES (?, ?, ?)",
+                (session_file, offset, mtime),
+            )
+            conn.commit()

@@ -1,4 +1,4 @@
-"""Token counter configuration loader."""
+"""Token counter + sessions configuration loader."""
 
 from __future__ import annotations
 
@@ -38,6 +38,12 @@ class TokenCounterConfig:
     cache_max_size: int = 10_000
     providers: dict[str, ProviderConfig] = field(default_factory=dict)
     heuristic: HeuristicConfig = field(default_factory=HeuristicConfig)
+
+
+@dataclass
+class SessionsConfig:
+    enabled: bool = True
+    paths: dict[str, str] = field(default_factory=dict)
 
 
 def load_config(path: str | Path = "config.json") -> dict[str, Any]:
@@ -90,4 +96,12 @@ def get_token_counter_config(config: dict[str, Any]) -> TokenCounterConfig:
         cache_max_size=tc.get("cache_max_size", 10_000),
         providers=providers,
         heuristic=heuristic,
+    )
+
+
+def get_sessions_config(config: dict[str, Any]) -> SessionsConfig:
+    s = config.get("sessions", {})
+    return SessionsConfig(
+        enabled=s.get("enabled", True),
+        paths=dict(s.get("paths", {})),
     )

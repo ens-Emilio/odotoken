@@ -6,25 +6,31 @@ import { useStats } from './api'
 import type { ViewId } from './views'
 import { OverviewView, ModelsView, ClientsView, EventsView, GuardView, SettingsView } from './views'
 
-function View({ id, timeFilter, project }: { id: ViewId; timeFilter: string; project: string }) {
+function View({ id, timeFilter, project, source }: { id: ViewId; timeFilter: string; project: string; source: string }) {
   switch (id) {
-    case 'overview': return <OverviewView timeFilter={timeFilter} project={project} />
-    case 'models': return <ModelsView timeFilter={timeFilter} project={project} />
-    case 'clients': return <ClientsView timeFilter={timeFilter} project={project} />
-    case 'events': return <EventsView timeFilter={timeFilter} project={project} />
+    case 'overview': return <OverviewView timeFilter={timeFilter} project={project} source={source} />
+    case 'models': return <ModelsView timeFilter={timeFilter} project={project} source={source} />
+    case 'clients': return <ClientsView timeFilter={timeFilter} project={project} source={source} />
+    case 'events': return <EventsView timeFilter={timeFilter} project={project} source={source} />
     case 'guard': return <GuardView />
     case 'settings': return <SettingsView />
   }
 }
 
 export default function App() {
-  const [view, setView] = useState<ViewId>(() => (location.hash.slice(1) as ViewId) || 'overview')
-  const [timeFilter, setTimeFilter] = useState('today')
-  const [project, setProject] = useState('all')
+  const [view, setView] = useState<ViewId>(() => {
+    const p = new URLSearchParams(location.search)
+    return (p.get('view') as ViewId) || (location.hash ? (location.hash.slice(1) as ViewId) : 'overview')
+  })
+  const initParams = new URLSearchParams(location.search)
+  const [timeFilter, setTimeFilter] = useState(() => initParams.get('since') || 'today')
+  const [project, setProject] = useState(() => initParams.get('project') || 'all')
+  const [source, setSource] = useState(() => initParams.get('source') || 'all')
   const [sidebarOpen, setSidebarOpen] = useState(true)
   const theme = useTheme()
 
-  const { data } = useStats(undefined, project)
+
+  const { data } = useStats(undefined, project, source)
   const guardStatus = data?.guard.status ?? 'ok'
   const prevStatus = useRef(guardStatus)
 
@@ -40,7 +46,25 @@ export default function App() {
   const changeView = (v: ViewId) => {
     setView(v)
     location.hash = v
+    const p = new URLSearchParams(location.search)
+    p.set('view', v)
+    history.replaceState(null, '', `${location.pathname}?${p.toString()}${location.hash}`)
   }
+
+  // keep URL in sync with filters for deep-links / share
+  useEffect(() => {
+    const p = new URLSearchParams(location.search)
+    if (view !== 'overview') p.set('view', view)
+    else p.delete('view')
+    if (timeFilter !== 'today') p.set('since', timeFilter)
+    else p.delete('since')
+    if (project !== 'all') p.set('project', project)
+    else p.delete('project')
+    if (source !== 'all') p.set('source', source)
+    else p.delete('source')
+    const qs = p.toString()
+    history.replaceState(null, '', `${location.pathname}${qs ? '?' + qs : ''}${location.hash}`)
+  }, [view, timeFilter, project, source])
 
   const viewTitle: Record<ViewId, string> = {
     overview: 'Overview',
@@ -73,12 +97,23 @@ export default function App() {
                       ? 'bg-[var(--accent)] text-[var(--accent-contrast)]'
                       : 'text-[var(--text-muted)] hover:bg-[var(--bg-fill-secondary)] hover:text-[var(--text-strong)]'
                   }`}
+                  aria-pressed={timeFilter === f}
                   onClick={() => setTimeFilter(f)}
                 >
                   {f === 'today' ? 'Today' : f === '7d' ? '7 days' : f === '30d' ? '30 days' : 'All'}
                 </button>
               ))}
             </div>
+            <span className="hidden text-[11px] font-medium text-[var(--text-soft)] md:inline">Source</span>
+            <label className="sr-only" htmlFor="source-filter">Source filter</label>
+            <select id="source-filter" value={source} onChange={(e) => setSource(e.target.value)} className="max-w-[150px] rounded-lg border border-[var(--border)] bg-[var(--bg-panel)] px-2.5 py-1.5 text-[11px] font-medium text-[var(--text-muted)]">
+              <option value="all">All sources</option>
+              <option value="proxy">Proxy</option>
+              <option value="import">Imported</option>
+              {(data?.by_source ?? []).map((s: any) => (
+                <option key={s.source} value={s.source}>{s.source} ({s.requests})</option>
+              ))}
+            </select>
             <span className="hidden text-[11px] font-medium text-[var(--text-soft)] md:inline">Project</span>
             <label className="sr-only" htmlFor="project-filter">Project filter</label>
             <select
@@ -113,7 +148,7 @@ export default function App() {
             exit={{ opacity: 0, y: -6 }}
             transition={{ duration: 0.15 }}
           >
-            <View id={view} timeFilter={timeFilter} project={project} />
+            <View id={view} timeFilter={timeFilter} project={project} source={source} />
           </motion.main>
         </AnimatePresence>
       </div>
