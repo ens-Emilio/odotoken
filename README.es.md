@@ -199,15 +199,16 @@ odotoken sessions import --since 2026-10-01
 
 | Setting | Descripción | Por defecto |
 |---------|-------------|-------------|
-| `proxy.host` / `proxy.port` | dirección de bind | `127.0.0.1:8080` |
+| `proxy.host` / `proxy.port` | dirección de bind | `127.0.0.1:8090` |
 | `providers.<clave>.upstream_url` | upstream de la ruta por prefijo | — |
 | `proxy.upstream_openai` / `upstream_anthropic` | upstreams de fallback para peticiones detectadas automáticamente | APIs oficiales |
-| `limits.monthly_budget_usd` | límite mensual de costo (0 = desactivado) | `0.0` |
-| `limits.daily_budget_usd`, `daily/monthly_tokens_limit` | más límites | `0` (desactivado) |
+| `limits.daily_cost_limit_usd` / `limits.monthly_cost_limit_usd` | límites diarios/mensuales de costo (0 = desactivado) | `null` |
+| `limits.daily_tokens_limit` / `limits.monthly_tokens_limit` | límites diarios/mensuales de tokens (0 = desactivado) | `null` |
 | `limits.action_on_breach` | `alert` o `block` (429) | `alert` |
+| `limits.webhook_url` | webhook notificado en `warning`/`breached` | `null` |
 | `database.path` | archivo SQLite (modo WAL) | `odotoken.db` |
-| `token_counter.enabled` | middleware de conteo pre-vuelo en el proxy | `false` |
-
+| `token_counter.enabled` | middleware de conteo pre-vuelo en el proxy | `true` |
+| `sessions.enabled` / `sessions.paths` | importación de sesiones locales (claude/codex/omp/crush) | `true` / `~/.claude/...` |
 ## Etiquetas de proyecto, shadow pricing y privacidad
 
 - **Etiquetas de proyecto** — envía `X-Odo-Project: <nombre>` (o `X-Project`) en cualquier petición; costos segmentados por proyecto en el dashboard, `/api/stats?project=<id>` y `odotoken stats --by-project`.
@@ -245,9 +246,8 @@ journalctl --user -u odotoken -n 50 --no-pager
 
 ## Desarrollo
 
-```bash
-.venv/bin/pip install -e . pytest pytest-asyncio
-.venv/bin/pytest                          # 75 tests (unit, integración, CLI, golden)
+.venv/bin/pip install -e ".[dev]" 2>/dev/null || .venv/bin/pip install -e . pytest pytest-asyncio
+.venv/bin/pytest                          # 125 tests (unit, integración, CLI, golden)
 cd frontend && pnpm install && pnpm build  # compila el dashboard → src/odotoken/static/
 ```
 

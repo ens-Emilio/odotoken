@@ -206,14 +206,16 @@ Details:
 
 | Setting | Description | Default |
 |---------|-------------|---------|
-| `proxy.host` / `proxy.port` | bind address | `127.0.0.1:8080` |
+| `proxy.host` / `proxy.port` | bind address | `127.0.0.1:8090` |
 | `providers.<key>.upstream_url` | path-prefix route upstream | — |
 | `proxy.upstream_openai` / `upstream_anthropic` | fallback upstreams for auto-detected requests | official APIs |
-| `limits.monthly_budget_usd` | monthly cost limit (0 = disabled) | `0.0` |
-| `limits.daily_budget_usd`, `daily/monthly_tokens_limit` | more limits | `0` (disabled) |
+| `limits.daily_cost_limit_usd` / `limits.monthly_cost_limit_usd` | daily/monthly cost limits (0 = disabled) | `null` |
+| `limits.daily_tokens_limit` / `limits.monthly_tokens_limit` | daily/monthly token limits (0 = disabled) | `null` |
 | `limits.action_on_breach` | `alert` or `block` (429) | `alert` |
+| `limits.webhook_url` | webhook notified on `warning`/`breached` | `null` |
 | `database.path` | SQLite file (WAL mode) | `odotoken.db` |
-| `token_counter.enabled` | pre-flight counting middleware on the proxy | `false` |
+| `token_counter.enabled` | pre-flight counting middleware on the proxy | `true` |
+| `sessions.enabled` / `sessions.paths` | local CLI session import (claude/codex/omp/crush) | `true` / `~/.claude/...` |
 
 ## Project tags, shadow pricing & privacy
 
@@ -247,16 +249,13 @@ journalctl --user -u odotoken -n 50 --no-pager
 - **Single process only** — SQLite + the in-memory cache assume one worker. Run `odotoken start` without `--workers` (default 1); multi-worker would split metering across processes with no shared state.
 
 - The proxy binds to `127.0.0.1` by default — local only
-- API keys pass through in headers; **nothing is logged or stored** — only token counts, model names, client app name (from User-Agent), cost and latency
-- Put it behind auth/reverse-proxy before exposing on a network
 
 ## Development
 
 ```bash
 .venv/bin/pip install -e ".[dev]" 2>/dev/null || .venv/bin/pip install -e . pytest pytest-asyncio
-.venv/bin/pytest                          # 75 tests (unit, integration, CLI, golden)
+.venv/bin/pytest                          # 125 tests (unit, integration, CLI, golden)
 cd frontend && pnpm install && pnpm build  # build dashboard → src/odotoken/static/
-```
 
 ## License
 
