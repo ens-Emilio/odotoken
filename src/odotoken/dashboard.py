@@ -488,7 +488,6 @@ def register_dashboard_routes(app: FastAPI, db: Database, guard: Guard | None = 
             except Exception:
                 pass
         return JSONResponse({"limits": limits})
-        return JSONResponse({"limits": limits})
 
     @app.get("/api/stats.csv")
     async def stats_csv(since: str | None = None, project: str | None = None, source: str | None = None):

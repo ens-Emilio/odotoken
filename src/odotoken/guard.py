@@ -20,6 +20,7 @@ class GuardLimits:
     daily_tokens_limit: int | None = None
     monthly_tokens_limit: int | None = None
     action_on_breach: str = "alert"  # "alert" or "block"
+    webhook_url: str | None = None
 
 
 @dataclass
@@ -97,6 +98,20 @@ class Guard:
         if self.limits.daily_tokens_limit and res.current_daily_tokens >= self.limits.daily_tokens_limit:
             msg = (
                 f"Daily token limit breached: {res.current_daily_tokens} >= {self.limits.daily_tokens_limit}"
+            )
+            if self.limits.action_on_breach == "block":
+                res.allowed = False
+                res.status = "breached"
+                res.reason = msg
+                return res
+            else:
+                res.status = "warning"
+                res.reason = msg
+
+        # Check monthly tokens
+        if self.limits.monthly_tokens_limit and res.current_monthly_tokens >= self.limits.monthly_tokens_limit:
+            msg = (
+                f"Monthly token limit breached: {res.current_monthly_tokens} >= {self.limits.monthly_tokens_limit}"
             )
             if self.limits.action_on_breach == "block":
                 res.allowed = False
