@@ -45,3 +45,6 @@ pip-log.txt
 
 # Local plans (untracked working notes)
 PLAN*.md
+# SQLite runtime sidecars
+*.db-shm
+*.db-wal

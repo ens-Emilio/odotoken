@@ -53,8 +53,18 @@ class CrushImporter:
         if not self.detect():
             return ScanResult(cli=self.name, available=False, path=str(self.projects_json))
         # unique files
-        files = set(str(p) for p in self._iter_dirs() for p in Path(p).rglob("*.jsonl") if Path(p).exists())
-        return ScanResult(cli=self.name, available=True, session_files=len(files), path=str(self.projects_json))
+        files = set(
+            str(p)
+            for d in self._iter_dirs()
+            for p in Path(d).rglob("*.jsonl")
+            if Path(p).exists()
+        )
+        return ScanResult(
+            cli=self.name,
+            available=True,
+            session_files=len(files),
+            path=str(self.projects_json),
+        )
 
     def iter_usages(self, since: str | None = None):
         seen_files: set[str] = set()

@@ -26,7 +26,9 @@ class CodexImporter:
         if not self.detect():
             return ScanResult(cli=self.name, available=False, path=str(self.sessions_dir))
         files = list(self._iter_files())
-        return ScanResult(cli=self.name, available=True, session_files=len(files), path=str(self.sessions_dir))
+        return ScanResult(
+            cli=self.name, available=True, session_files=len(files), path=str(self.sessions_dir)
+        )
 
     def iter_usages(self, since: str | None = None):
         for filepath in self._iter_files():
@@ -75,7 +77,11 @@ class CodexImporter:
                                 cli=self.name,
                                 session_id=payload.get("session_id") or session_id,
                                 session_file=str(filepath),
-                                entry_id=payload.get("response_id") or obj.get("timestamp") or f"{session_id}:{prompt}",
+                                entry_id=(
+                                    payload.get("response_id")
+                                    or obj.get("timestamp")
+                                    or f"{session_id}:{prompt}"
+                                ),
                                 timestamp=ts,
                                 provider=provider,
                                 model=model,

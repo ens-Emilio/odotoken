@@ -373,7 +373,7 @@ def register_dashboard_routes(app: FastAPI, db: Database, guard: Guard | None = 
             return FileResponse(str(static_dir / "index.html"))
 
     @app.get("/api/config")
-    async def config_api():
+    def config_api():
         """Exposed subset of config.json for dashboard."""
         import json as _jc
         from pathlib import Path as _Pc
@@ -381,7 +381,8 @@ def register_dashboard_routes(app: FastAPI, db: Database, guard: Guard | None = 
         for cand in [_Pc("config.json"), _Pc(__file__).parent.parent.parent.parent / "config.json"]:
             if cand.exists():
                 try:
-                    cfg = _jc.loads(cand.read_text()); break
+                    cfg = _jc.loads(cand.read_text())
+                    break
                 except Exception:
                     pass
         providers = sorted((cfg.get("providers") or {}).keys())
@@ -447,13 +448,14 @@ def register_dashboard_routes(app: FastAPI, db: Database, guard: Guard | None = 
             }
         )
     @app.patch("/api/guard/limits")
-    async def patch_limits(body: dict):
+    def patch_limits(body: dict):
         import json as _jg
         from pathlib import Path as _Pg
         cfg_path = None
         for cand in [_Pg("config.json"), _Pg(__file__).parent.parent.parent.parent / "config.json"]:
             if cand.exists():
-                cfg_path = cand; break
+                cfg_path = cand
+                break
         if not cfg_path:
             cfg_path = _Pg("config.json")
         cfg: dict = {}
@@ -491,7 +493,8 @@ def register_dashboard_routes(app: FastAPI, db: Database, guard: Guard | None = 
 
     @app.get("/api/stats.csv")
     async def stats_csv(since: str | None = None, project: str | None = None, source: str | None = None):
-        import csv, io
+        import csv
+        import io
         rows = db.get_recent_events(limit=5000, since=since, project=project, source=source)
         buf = io.StringIO()
         w = csv.DictWriter(buf, fieldnames=["id","timestamp","provider","model","client_app","prompt_tokens","completion_tokens","total_tokens","cost_usd","latency_ms","source"])
@@ -503,17 +506,19 @@ def register_dashboard_routes(app: FastAPI, db: Database, guard: Guard | None = 
 
 
     @app.post("/api/sessions/import")
-    async def sessions_import(since: str | None = None, dry_run: bool = False):
+    def sessions_import(since: str | None = None, dry_run: bool = False):
         """Trigger import of local CLI sessions. Synchronous, returns stats."""
         import json as _json
         from pathlib import Path as _Path
-        from odotoken.pricing import PricingCalculator as _PC
+
         from odotoken.importers.service import import_sessions as _import
+        from odotoken.pricing import PricingCalculator as _PC
         cfg = {}
         for cand in [_Path("config.json"), _Path(__file__).parent.parent.parent.parent / "config.json"]:
             if cand.exists():
                 try:
-                    cfg = _json.loads(cand.read_text()); break
+                    cfg = _json.loads(cand.read_text())
+                    break
                 except Exception:
                     pass
         pricing = _PC(_Path("prices.json") if _Path("prices.json").exists() else "prices.json")
@@ -524,6 +529,7 @@ def register_dashboard_routes(app: FastAPI, db: Database, guard: Guard | None = 
     async def sessions_scan():
         import json as _json2
         from pathlib import Path as _Path2
+
         from odotoken.importers.registry import scan_all as _scan
         cfg2 = {}
         for cand in [_Path2("config.json"), _Path2(__file__).parent.parent.parent.parent / "config.json"]:

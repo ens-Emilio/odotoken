@@ -109,9 +109,13 @@ class Guard:
                 res.reason = msg
 
         # Check monthly tokens
-        if self.limits.monthly_tokens_limit and res.current_monthly_tokens >= self.limits.monthly_tokens_limit:
+        if (
+            self.limits.monthly_tokens_limit
+            and res.current_monthly_tokens >= self.limits.monthly_tokens_limit
+        ):
             msg = (
-                f"Monthly token limit breached: {res.current_monthly_tokens} >= {self.limits.monthly_tokens_limit}"
+                f"Monthly token limit breached: {res.current_monthly_tokens} >= "
+                f"{self.limits.monthly_tokens_limit}"
             )
             if self.limits.action_on_breach == "block":
                 res.allowed = False

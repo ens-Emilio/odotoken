@@ -48,7 +48,9 @@ def scan(
     table.add_column("Entries", justify="right")
     table.add_column("Path", overflow="fold")
     for r in results:
-        table.add_row(r.cli, "yes" if r.available else "no", str(r.session_files), str(r.total_entries), r.path)
+        table.add_row(
+            r.cli, "yes" if r.available else "no", str(r.session_files), str(r.total_entries), r.path
+        )
     console.print(table)
 
 
@@ -64,7 +66,9 @@ def import_cmd(
     config = _load_config(config_path)
     db_path = _resolve_db_path(config)
     db = Database(db_path)
-    pricing = PricingCalculator(price_file=Path("prices.json") if Path("prices.json").exists() else "prices.json")
+    pricing = PricingCalculator(
+        price_file=Path("prices.json") if Path("prices.json").exists() else "prices.json"
+    )
     clis = [c.strip() for c in cli.split(",")] if cli else None
     stats = import_sessions(db, pricing, config=config, clis=clis, since=since, dry_run=dry_run)
     if json_out:
@@ -101,9 +105,14 @@ def stats(
     by_source = db.get_summary_by_source(since=since)
     by_model = db.get_summary_by_model(since=since)
     if json_out:
-        console.print(json.dumps({"summary": summary, "by_source": by_source, "by_model": by_model}, indent=2))
+        console.print(
+            json.dumps({"summary": summary, "by_source": by_source, "by_model": by_model}, indent=2)
+        )
         return
-    console.print(f"[bold]Total:[/bold] {summary.get('total_requests',0)} req  {summary.get('total_tokens',0)} tok  ${summary.get('total_cost_usd',0.0):.6f}")
+    console.print(
+        f"[bold]Total:[/bold] {summary.get('total_requests', 0)} req  "
+        f"{summary.get('total_tokens', 0)} tok  ${summary.get('total_cost_usd', 0.0):.6f}"
+    )
     if by_cli or True:
         table = Table(title="By source", show_header=True)
         table.add_column("Source")
@@ -111,7 +120,9 @@ def stats(
         table.add_column("Tokens", justify="right")
         table.add_column("Cost", justify="right")
         for row in by_source:
-            table.add_row(row["source"], str(row["requests"]), str(row["total_tokens"]), f"${row['cost_usd']:.6f}")
+            table.add_row(
+                row["source"], str(row["requests"]), str(row["total_tokens"]), f"${row['cost_usd']:.6f}"
+            )
         console.print(table)
 
 
@@ -128,11 +139,16 @@ def watch(
     config = _load_config(config_path)
     db_path = _resolve_db_path(config)
     db = Database(db_path)
-    pricing = PricingCalculator(price_file=Path("prices.json") if Path("prices.json").exists() else "prices.json")
+    pricing = PricingCalculator(
+        price_file=Path("prices.json") if Path("prices.json").exists() else "prices.json"
+    )
     console.print(f"[dim]Watching every {interval}s — db={db_path}[/dim]")
     while True:
         stats = import_sessions(db, pricing, config=config)
-        console.print(f"[green]import[/green] scanned={stats.scanned} inserted={stats.inserted} skipped={stats.skipped_dup} cost=${stats.cost_usd:.4f}")
+        console.print(
+            f"[green]import[/green] scanned={stats.scanned} inserted={stats.inserted} "
+            f"skipped={stats.skipped_dup} cost=${stats.cost_usd:.4f}"
+        )
         try:
             time.sleep(interval)
         except KeyboardInterrupt:

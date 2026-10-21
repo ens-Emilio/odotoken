@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from pathlib import Path
-
 from odotoken.importers.base import ScanResult
 from odotoken.importers.claude import ClaudeImporter
 from odotoken.importers.codex import CodexImporter
@@ -25,10 +23,7 @@ def get_importers(config: dict | None = None):
 
 
 def scan_all(config: dict | None = None, since: str | None = None) -> list[ScanResult]:
-    results = []
-    for imp in get_importers(config):
-        results.append(imp.scan(since=since))
-    return results
+    return [imp.scan(since=since) for imp in get_importers(config)]
 
 
 def get_importer_by_name(name: str, config: dict | None = None):

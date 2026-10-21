@@ -103,12 +103,14 @@ class Database:
             conn.execute("CREATE INDEX IF NOT EXISTS idx_token_events_project ON token_events(project_id);")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_token_events_source ON token_events(source);")
             conn.execute(
-                "CREATE INDEX IF NOT EXISTS idx_token_events_source_entry ON token_events(source, session_file, entry_id);"
+                "CREATE INDEX IF NOT EXISTS idx_token_events_source_entry ON "
+                "token_events(source, session_file, entry_id);"
             )
             # Dedup: unique where entry_id != '' (imports); proxy rows keep '' and can duplicate
             # Use a unique index with WHERE entry_id != '' (partial index)
             conn.execute(
-                "CREATE UNIQUE INDEX IF NOT EXISTS uq_token_events_import ON token_events(source, session_file, entry_id) WHERE entry_id != '';"
+                "CREATE UNIQUE INDEX IF NOT EXISTS uq_token_events_import ON "
+                "token_events(source, session_file, entry_id) WHERE entry_id != '';"
             )
             # Import offsets for incremental JSONL scans
             conn.execute(
@@ -369,7 +371,9 @@ class Database:
             rows = conn.execute(query, params).fetchall()
             return [dict(r) for r in rows]
 
-    def get_summary_by_project(self, since: str | None = None, source: str | None = None) -> list[dict[str, Any]]:
+    def get_summary_by_project(
+        self, since: str | None = None, source: str | None = None
+    ) -> list[dict[str, Any]]:
         query = """
             SELECT
                 project_id,
@@ -422,7 +426,9 @@ class Database:
             rows = conn.execute(query, params).fetchall()
             return [dict(r) for r in rows]
 
-    def get_daily_usage(self, days: int = 30, since: str | None = None, source: str | None = None) -> list[dict[str, Any]]:
+    def get_daily_usage(
+        self, days: int = 30, since: str | None = None, source: str | None = None
+    ) -> list[dict[str, Any]]:
         query = """
             SELECT
                 substr(timestamp, 1, 10) as day,
@@ -448,17 +454,22 @@ class Database:
         with self.connection() as conn:
             rows = conn.execute(query, params).fetchall()
             return [dict(r) for r in rows]
-    def get_daily_usage_grouped(self, days: int = 30, since: str | None = None) -> list[dict[str, Any]]:
-        """Daily usage pivoted by source (proxy vs import:*). Returns {day, source, requests, ...} rows."""
+    def get_daily_usage_grouped(
+        self, days: int = 30, since: str | None = None
+    ) -> list[dict[str, Any]]:
+        """Daily usage pivoted by source (proxy vs import:*). Returns {day, source, ...} rows."""
         query = """
-            SELECT substr(timestamp,1,10) as day, source, COUNT(*) as requests, SUM(total_tokens) as total_tokens, SUM(cost_usd) as cost_usd
+            SELECT substr(timestamp,1,10) as day, source, COUNT(*) as requests,
+                SUM(total_tokens) as total_tokens, SUM(cost_usd) as cost_usd
             FROM token_events WHERE 1=1
         """
         params: list[Any] = []
         if since:
-            query += " AND datetime(timestamp) >= datetime(?)"; params.append(since)
+            query += " AND datetime(timestamp) >= datetime(?)"
+            params.append(since)
         else:
-            query += " AND timestamp >= datetime('now','-' || ? || ' days')"; params.append(days)
+            query += " AND timestamp >= datetime('now','-' || ? || ' days')"
+            params.append(days)
         query += " GROUP BY day, source ORDER BY day ASC, source ASC"
         with self.connection() as conn:
             return [dict(r) for r in conn.execute(query, params).fetchall()]

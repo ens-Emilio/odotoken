@@ -15,6 +15,7 @@ from rich.table import Table
 
 from odotoken.cli.commands.count import get_count_app
 from odotoken.cli.commands.models import get_models_app
+from odotoken.cli.commands.sessions import get_sessions_app
 from odotoken.dashboard import register_dashboard_routes
 from odotoken.db import Database
 from odotoken.guard import Guard, GuardLimits
@@ -31,7 +32,6 @@ console = Console()
 
 app.add_typer(get_count_app(), name="count")
 app.add_typer(get_models_app(), name="models")
-from odotoken.cli.commands.sessions import get_sessions_app
 app.add_typer(get_sessions_app(), name="sessions")
 
 

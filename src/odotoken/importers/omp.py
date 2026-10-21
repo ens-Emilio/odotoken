@@ -25,7 +25,13 @@ class OmpImporter:
             cur = conn.execute("SELECT COUNT(*) FROM messages")
             total = cur.fetchone()[0]
             conn.close()
-            return ScanResult(cli=self.name, available=True, session_files=1, total_entries=total, path=str(self.db_path))
+            return ScanResult(
+                cli=self.name,
+                available=True,
+                session_files=1,
+                total_entries=total,
+                path=str(self.db_path),
+            )
         except Exception:
             return ScanResult(cli=self.name, available=True, path=str(self.db_path))
 
