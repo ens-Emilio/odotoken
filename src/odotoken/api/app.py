@@ -43,7 +43,7 @@ def create_app(config_path: str = "config.json") -> FastAPI:
 
     app = FastAPI(
         title="odotoken - Token Counter API",
-        version="0.1.0",
+        version="0.2.0",
         lifespan=lifespan,
     )
 

@@ -39,7 +39,7 @@ def create_proxy_app(
         yield
         await http_client.aclose()
 
-    app = FastAPI(title="odotoken - AI Token Proxy", version="0.1.0", lifespan=lifespan)
+    app = FastAPI(title="odotoken - AI Token Proxy", version="0.2.0", lifespan=lifespan)
     if config.get("chaos", {}).get("enabled", False):
         app.add_middleware(ChaosMiddleware, chaos_cfg=config.get("chaos", {}))
         logger.info("Chaos middleware enabled (rate=%s)", config["chaos"].get("rate"))

@@ -1,6 +1,6 @@
 [project]
 name = "odotoken"
-version = "0.1.0"
+version = "0.2.0"
 description = "Transparent AI token metering proxy, usage tracker and budget guard"
 license = "GPL-3.0-or-later"
 requires-python = ">=3.13"

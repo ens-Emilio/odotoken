@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## [Unreleased] - 2026-10-20
+## [0.2.0] - 2026-10-21
 ### Added
 - Local CLI session import (`odotoken sessions scan|import|stats`) — reads `~/.omp/stats.db`, `~/.claude/projects/**/*.jsonl`, `~/.codex/sessions/**`, `~/.local/share/crush/**`; re-priced via `prices.json`, deduped by `UNIQUE(source, session_file, entry_id)`, incremental `--since` + `--cli` filters (49k+ rows verified)
 - Dashboard Source filter (All / Proxy / Imported / import:omp …) + `GET /api/stats?source=` + `POST /api/sessions/import` + Overview "By Source" card
