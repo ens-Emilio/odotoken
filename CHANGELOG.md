@@ -4,7 +4,7 @@ All notable changes to this project will be documented in this file.
 
 ## [0.2.0] - 2026-10-21
 ### Added
-- Local CLI session import (`odotoken sessions scan|import|stats`) — reads `~/.omp/stats.db`, `~/.claude/projects/**/*.jsonl`, `~/.codex/sessions/**`, `~/.local/share/crush/**`; re-priced via `prices.json`, deduped by `UNIQUE(source, session_file, entry_id)`, incremental `--since` + `--cli` filters (49k+ rows verified)
+- Local CLI session import (`odotoken sessions scan|import|stats`) — reads `~/.omp/stats.db`, `~/.claude/projects/**/*.jsonl`, `~/.codex/sessions/**`, `~/.local/share/crush/**`; re-priced via `prices.json`, deduped by `UNIQUE(source, session_file, entry_id)`, incremental `--since` + `--cli` filters
 - Dashboard Source filter (All / Proxy / Imported / import:omp …) + `GET /api/stats?source=` + `POST /api/sessions/import` + Overview "By Source" card
 - `sessions` section in `config.json` and `src/odotoken/infra/config.py` (`enabled`, `paths` per CLI)
 - Project tags (`X-Odo-Project` / `X-Project` header) — `project_id` column, `get_summary_by_project`, dashboard project filter, `odotoken stats --by-project`

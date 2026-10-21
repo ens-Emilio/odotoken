@@ -48,3 +48,7 @@ PLAN*.md
 # SQLite runtime sidecars
 *.db-shm
 *.db-wal
+
+# Local config (track config.json.example as template; user copies to config.json)
+config.json
+!config.json.example

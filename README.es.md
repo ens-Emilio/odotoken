@@ -61,7 +61,10 @@ cd frontend && pnpm install && pnpm build && cd ..
 
 ### 1. Configuración
 
-Copia y edita `config.json`:
+```bash
+cp config.json.example config.json  # edita upstreams / limits / sessions
+```
+`config.json` mínimo:
 
 ```jsonc
 {
