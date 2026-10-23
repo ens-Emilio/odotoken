@@ -123,3 +123,11 @@ html, body {
   max-width: 256px;
   width: 100%;
 }
+.select-option[aria-selected="true"] {
+  background-color: #3a3a3a !important;
+  color: #f2f2f2 !important;
+  font-weight: 500;
+}
+.select-option[aria-selected="true"]:hover {
+  background-color: #454545 !important;
+}
