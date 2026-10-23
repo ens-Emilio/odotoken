@@ -7,10 +7,12 @@ import { toast } from './ui/Toast'
 export default function GuardView() {
   const { data, isLoading } = useStats()
   if (isLoading) return <div className="p-5"><div className="h-48 animate-pulse rounded-[var(--radius)] bg-[var(--bg-fill-tertiary)]" /></div>
-  if (!data || !data.guard.limits) return <div className="p-5 text-center text-[12px] text-[var(--text-soft)]">Guard not configured — add <code>limits</code> to config.json</div>
-  const { guard } = data
-  const tone = guard.status === 'breached' ? 'danger' : guard.status === 'warning' ? 'warn' : 'brand'
-  const cur = guard.current ?? { daily_cost_usd: 0, monthly_cost_usd: 0, daily_tokens: 0, monthly_tokens: 0 }
+ if (!data) return <div className="p-5"><div className="h-48 animate-pulse rounded-[var(--radius)] bg-[var(--bg-fill-tertiary)]" /></div>
+ if (!data.guard) return <div className="p-5 text-center text-[12px] text-[var(--text-soft)]">No spending limits configured — unlimited usage</div>
+ const { guard } = data
+ if (!guard.limits) return <div className="p-5 text-center text-[12px] text-[var(--text-soft)]">Guard not configured — add <code>limits</code> to config.json</div>
+ const cur = guard.current ?? { daily_cost_usd: 0, monthly_cost_usd: 0, daily_tokens: 0, monthly_tokens: 0 }
+ const tone = guard.status === 'breached' ? 'danger' : guard.status === 'warning' ? 'warn' : 'brand'
   const nz = (v: number | null) => (v ? v : null)
   const limits = {
     daily_cost_limit_usd: nz(guard.limits.daily_cost_limit_usd),

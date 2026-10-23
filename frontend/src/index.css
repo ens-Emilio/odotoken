@@ -1,4 +1,6 @@
 @import "tailwindcss";
+@variant dark (&:where(.dark, .dark *));
+
 @import "./tokens.css";
 
 @theme inline {
@@ -74,4 +76,50 @@ html, body {
     linear-gradient(to right, rgba(255,255,255,0.08), transparent) left top / 12px 100% no-repeat,
     linear-gradient(to left, rgba(255,255,255,0.05), transparent) right top / 12px 100% no-repeat;
   background-attachment: local, local, scroll, scroll;
+}
+.select-option {
+  display: block;
+  width: 100%;
+  max-width: 100%;
+  padding: 0.5rem 0.75rem;
+  font-size: 11px;
+  line-height: 1.25rem;
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-strong);
+  background-color: transparent;
+}
+.select-option:hover {
+  background-color: rgba(0, 0, 0, 0.04);
+}
+.dark .select-option:hover {
+  background-color: rgba(255, 255, 255, 0.06);
+}
+.select-option-active {
+ background-color: rgba(0, 0, 0, 0.08) !important;
+ color: var(--text-strong) !important;
+ font-weight: 500;
+}
+.dark .select-option-active {
+ background-color: rgba(255, 255, 255, 0.15) !important;
+ color: #f2f2f2 !important;
+}
+.select-option-active:hover {
+ background-color: rgba(0, 0, 0, 0.12) !important;
+}
+.dark .select-option-active:hover {
+ background-color: rgba(255, 255, 255, 0.22) !important;
+}
+.select-dropdown-list {
+  max-width: 256px !important;
+  width: 100% !important;
+}
+.select-dropdown-list .select-option {
+  max-width: 256px !important;
+}
+.select-dropdown-constrained {
+  max-width: 256px;
+  width: 100%;
 }

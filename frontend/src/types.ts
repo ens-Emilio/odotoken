@@ -7,6 +7,7 @@ export interface Summary {
   total_cache_write_tokens: number
   total_cost_usd: number
   avg_latency_ms: number
+  avg_ttfb_ms: number
 }
 
 export interface ModelRow {
@@ -34,14 +35,17 @@ export interface EventRow {
   provider: string
   model: string
   client_app: string
+  status_code: number
   prompt_tokens: number
-  completion_tokens: number
   total_tokens: number
+  completion_tokens: number
   cache_read_tokens: number
   cache_write_tokens: number
   cost_usd: number
   latency_ms: number
-  status_code: number
+  ttfb_ms: number
+  streaming_ms: number
+  tags: string
 }
 
 export interface DailyRow {
@@ -90,6 +94,24 @@ export interface SourceRow {
   cost_usd: number
 }
 
+export interface TpsBucket {
+  bucket: string
+  requests: number
+  total_tokens: number
+  completion_tokens: number
+  total_latency_ms: number
+  avg_latency_ms: number
+  avg_tps: number
+  peak_tps: number
+}
+export interface TpsModelRow { model: string; provider: string; requests: number; completion_tokens: number; total_tokens: number; cost_usd: number; avg_latency_ms: number; tps: number }
+export interface TpsProjectRow { project_id: string; requests: number; completion_tokens: number; total_tokens: number; cost_usd: number; avg_latency_ms: number; tps: number }
+export interface TpsSummary { requests: number; completion_tokens: number; total_tokens: number; total_latency_ms: number; avg_latency_ms: number; avg_tps: number; peak_tps: number }
+export interface TpsData { series: TpsBucket[]; by_model: TpsModelRow[]; by_project: TpsProjectRow[]; summary: TpsSummary; live_tps: number; interval: string }
+export interface TagRow { tag: string; requests: number; total_tokens: number; cost_usd: number }
+export interface ForecastPoint { day: string; cost_usd: number }
+export interface Anomaly { day: string; cost_usd: number; threshold: number }
+export interface Forecast { forecast: ForecastPoint[]; anomalies: Anomaly[]; daily: DailyRow[] }
 export interface Stats {
   summary: Summary
   by_model: ModelRow[]
@@ -99,5 +121,21 @@ export interface Stats {
   savings: Savings
   recent_events: EventRow[]
   daily: DailyRow[]
+  tps: TpsSummary
   guard: GuardInfo
+  by_tag: TagRow[]
+  live_sessions: LiveSession[]
+}
+
+export interface LiveSession {
+  cli: string
+  session_id: string
+  provider: string
+  model: string
+  tokens_input: number
+  tokens_output: number
+  cost_usd: number
+  project: string
+  title: string
+  last_updated: string
 }

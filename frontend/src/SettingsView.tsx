@@ -1,8 +1,70 @@
+import { useMemo } from 'react'
+import { Select, type SelectGroup } from './ui/Select'
 import { Card, CardHeader, Badge } from './ui/Card'
+import { useTimezone } from './context/TimezoneContext'
+
+function getOffsetString(tz: string): string {
+  try {
+    const formatter = new Intl.DateTimeFormat('en-US', {
+      timeZone: tz,
+      timeZoneName: 'shortOffset',
+    })
+    const parts = formatter.formatToParts(new Date())
+    const tzPart = parts.find(p => p.type === 'timeZoneName')
+    if (tzPart) {
+      return tzPart.value.replace('GMT', 'UTC')
+    }
+  } catch {}
+  return ''
+}
 
 export default function SettingsView() {
+  const { timezone, setTimezone } = useTimezone()
+
+  const groupedOptions: SelectGroup[] = useMemo(() => {
+    const zones = Intl.supportedValuesOf ? Intl.supportedValuesOf('timeZone') : []
+    const groups: Record<string, string[]> = {}
+    for (const z of zones) {
+      const region = z.split('/')[0] || 'Other'
+      if (!groups[region]) groups[region] = []
+      groups[region].push(z)
+    }
+    return Object.entries(groups).map(([label, opts]) => ({
+      label,
+      options: opts.map(value => ({ value, label: value })),
+    }))
+  }, [])
+
+  const currentOffset = getOffsetString(timezone)
+  const browserTz = Intl.DateTimeFormat().resolvedOptions().timeZone
+
   return (
     <div className="space-y-5 p-5">
+      <Card>
+        <CardHeader title="Timezone" subtitle="display timestamps in your preferred timezone" />
+        <div className="space-y-3 px-5 pb-5 text-[12px]">
+          <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:gap-3">
+            <label htmlFor="tz-select" className="w-24 shrink-0 text-[var(--text-muted)]">Timezone</label>
+            <Select
+              id="tz-select"
+              value={timezone}
+              onChange={setTimezone}
+              options={groupedOptions}
+            />
+            <Badge>{currentOffset}</Badge>
+          </div>
+          <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:gap-3">
+            <span className="w-24 shrink-0" />
+            <button
+              onClick={() => setTimezone(browserTz)}
+              className="rounded-lg border border-[var(--border)] bg-[var(--bg-panel)] px-3 py-1.5 text-[11px] font-medium text-[var(--text-muted)] hover:text-[var(--text-strong)]"
+            >
+              Detect from browser ({browserTz})
+            </button>
+          </div>
+        </div>
+      </Card>
+
       <Card>
         <CardHeader title="Service" subtitle="odotoken proxy status" />
         <div className="space-y-2 px-5 pb-5 text-[12px]">
@@ -12,7 +74,7 @@ export default function SettingsView() {
           </div>
           <div className="flex items-center justify-between">
             <span className="text-[var(--text-muted)]">Version</span>
-            <Badge>0.1.0</Badge>
+            <Badge>0.2.0</Badge>
           </div>
           <div className="flex items-center justify-between">
             <span className="text-[var(--text-muted)]">Dashboard refresh</span>

@@ -95,7 +95,7 @@ export function SortableTable<T>({ rows, columns, pageSize = 25, rowKey, onRowCl
           </thead>
           <tbody className="divide-y divide-[var(--border-soft)] text-[var(--text)]">
             {pageRows.length === 0 ? (
-              <tr><td colSpan={columns.length} className="py-8 text-center text-[12px] text-[var(--text-soft)]">No data in this period — try a wider time range</td></tr>
+              <tr><td colSpan={columns.length} className="py-8 text-center text-[12px] text-[var(--text-soft)]">No records found</td></tr>
             ) : pageRows.map((row) => (
               <tr
                 key={rowKey(row)}

@@ -4,9 +4,9 @@ import { Card, CardHeader, Badge } from './ui/Card'
 import { SortableTable, type Column } from './ui/SortableTable'
 import type { ModelRow } from './types'
 
-export default function ModelsView({ timeFilter, project, source }: { timeFilter: string; project: string; source: string }) {
+export default function ModelsView({ timeFilter, project, source, tag }: { timeFilter: string; project: string; source: string; tag: string }) {
   const since = sinceForFilter(timeFilter)
-  const { data, isLoading } = useStats(since, project, source)
+  const { data, isLoading } = useStats(since, project, source, tag)
 
   if (isLoading) return <div className="p-5"><div className="h-64 animate-pulse rounded-[var(--radius)] bg-[var(--bg-fill-tertiary)]" /></div>
   if (!data) return null
