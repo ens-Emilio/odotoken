@@ -97,21 +97,6 @@ html, body {
 .dark .select-option:hover {
   background-color: rgba(255, 255, 255, 0.06);
 }
-.select-option-active {
- background-color: rgba(0, 0, 0, 0.08);
- color: var(--text-strong);
- font-weight: 500;
-}
-.dark .select-option-active {
- background-color: rgba(255, 255, 255, 0.15);
- color: #f2f2f2;
-}
-.select-option-active:hover {
- background-color: rgba(0, 0, 0, 0.12);
-}
-.dark .select-option-active:hover {
- background-color: rgba(255, 255, 255, 0.22);
-}
 .select-dropdown-list {
  max-width: 256px;
  width: 100%;
