@@ -1,0 +1,13 @@
+# Linguist overrides — fix GitHub language stats
+# Go source
+*.go linguist-language=Go
+# Frontend assets (generated, not source)
+src/odotoken/static/assets/* linguist-generated=true
+internal/server/static/assets/* linguist-generated=true
+# Lock files
+pnpm-lock.yaml linguist-generated=true
+uv.lock linguist-generated=true
+go.sum linguist-generated=true
+# Vendored / binary
+bin/* linguist-vendored=true
+odotoken linguist-vendored=true

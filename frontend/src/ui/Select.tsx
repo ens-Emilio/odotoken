@@ -121,7 +121,7 @@ export function Select({ value, onChange, options, placeholder = 'Select…', di
                       aria-selected={opt.value === value}
                       onClick={() => { onChange(opt.value); close() }}
                       className={`select-option ${opt.value === value ? 'select-option-active' : ''}`}
-                      style={opt.value === value ? { backgroundColor: 'var(--bg-muted)', color: 'var(--text-strong)', fontWeight: 500, maxWidth: '256px' } : { maxWidth: '256px' }}
+ style={opt.value === value ? { backgroundColor: '#3a3a3a', color: '#f2f2f2', fontWeight: 500, maxWidth: '256px' } : { maxWidth: '256px' }}
                     >
                       {opt.label}
                     </li>
@@ -135,7 +135,7 @@ export function Select({ value, onChange, options, placeholder = 'Select…', di
                   aria-selected={opt.value === value}
                   onClick={() => { onChange(opt.value); close() }}
                   className={`select-option ${opt.value === value ? 'select-option-active' : ''}`}
-                  style={opt.value === value ? { backgroundColor: 'var(--bg-muted)', color: 'var(--text-strong)', fontWeight: 500, maxWidth: '256px' } : { maxWidth: '256px' }}
+ style={opt.value === value ? { backgroundColor: '#3a3a3a', color: '#f2f2f2', fontWeight: 500, maxWidth: '256px' } : { maxWidth: '256px' }}
                 >
                   {opt.label}
                 </li>
