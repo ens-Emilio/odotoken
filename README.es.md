@@ -42,6 +42,10 @@ El uso de tokens se extrae tanto de respuestas JSON como de streams SSE (incluye
 - **API de conteo de tokens** — servicio independiente opcional para conteo pre-vuelo (heurística + APIs remotas de proveedores)
 - **Catálogo de modelos** — alias, ventanas de contexto, estrategias de conteo por modelo
 - **Caché con TTL** — versionada, invalidada cuando cambian catálogo/tokenizer
+- **Métricas de throughput** — TPS/TTFT por modelo, proyecto e intervalo (`GET /api/tps`, `odotoken stats --tps`, vista Throughput)
+- **Replay & optimize** — reprecificar eventos históricos con precios actuales (`odotoken replay`) y recomendaciones de modelos más baratos (`odotoken optimize`)
+- **Tags & forecast** — segmentación vía `X-Odo-Tags` y forecast lineal de costo + detección de anomalías en Overview
+- **Alertas & export** — alertas Slack/Discord/Telegram/SMTP en breach de presupuesto, límites por proyecto, export CSV (`GET /api/export?format=csv`)
 
 ## Instalación
 

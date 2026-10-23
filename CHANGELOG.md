@@ -2,6 +2,28 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+### Changed
+- Dashboard filter bar redesigned: Source/Project/Tag moved into a compact "Filters" dropdown with active-count badge; Time and Theme remain inline; removed label spans that broke layout on narrow viewports
+- Select dropdown: fixed dark-mode contrast on active item (`rgba(255,255,255,0.15)` over `#1e1e1e`), constrained to 256px max-width with text truncation for long project names
+- Tailwind v4 dark variant configured via `@variant dark (&:where(.dark, .dark *))` in `index.css`
+
+## [0.3.0] - 2026-10-22
+### Added
+- TPS metrics: `get_tps_series`/`get_tps_summary`/`get_tps_by_model`/`get_tps_by_project` in `db.py`, `GET /api/tps`, TPS KPIs + ThroughputView, TTFT/streaming (`ttfb_ms`/`streaming_ms` columns, TTFT column in EventsView + ticker), `odotoken stats --tps`
+- Guard per-project budgets (`limits.projects` with per-project daily/monthly cost/token caps, `PATCH /api/guard/limits` merge + per-project alerts)
+- Guard alerts to Slack/Discord/Telegram/SMTP (`dispatch_alerts`) + `GET /api/export?format=csv` + `token bucket rate limit por project_id`
+- `odotoken replay` (re-price historical events with current prices, `--apply` to write, `shadow_cost` sim)
+- Dashboard auth (Bearer token / Basic, `config.auth`, `_check_auth` middleware)
+- `X-Odo-Tags`/`by_tag` filter (tags column + index, `get_summary_by_tag`, dashboard tag filter, tag-filtered CSV)
+
+### Changed
+- Replay/`shadow_cost` diff surfaces in CLI + dashboard; `PATCH /api/guard/limits` now merges fields instead of replacing
+- `optimize` surfaces per-model ratio/cache-read notes; fallback triggers on non-auth 4xx and 5xx
+
+### Fixed
+- Restored `semantic_cache_get`/`semantic_cache_set` import/lint integrity in `db.py` and `PATCH /api/guard/limits` merge structure
+
 ## [0.2.0] - 2026-10-21
 ### Added
 - Local CLI session import (`odotoken sessions scan|import|stats`) — reads `~/.omp/stats.db`, `~/.claude/projects/**/*.jsonl`, `~/.codex/sessions/**`, `~/.local/share/crush/**`; re-priced via `prices.json`, deduped by `UNIQUE(source, session_file, entry_id)`, incremental `--since` + `--cli` filters

@@ -42,6 +42,10 @@ Token usage is extracted from both regular JSON responses and SSE streams (inclu
 - **Token counting API** — optional standalone service for pre-flight counts (heuristic + remote provider APIs)
 - **Model catalog** — aliases, context windows, per-model counting strategies
 - **Cache with TTL** — versioned, invalidated on catalog/tokenizer changes
+- **Throughput metrics** — TPS/TTFT per model, project and interval (`GET /api/tps`, `odotoken stats --tps`, Throughput view)
+- **Replay & optimize** — re-price historical events with current prices (`odotoken replay`) and get cheaper-model recommendations (`odotoken optimize`)
+- **Tags & forecast** — `X-Odo-Tags` segmentation and linear cost forecast + anomaly detection on Overview
+- **Alerts & export** — Slack/Discord/Telegram/SMTP alerts on budget breach, per-project limits, CSV export (`GET /api/export?format=csv`)
 
 ## Installation
 
@@ -128,6 +132,9 @@ odotoken models info <model-id>
 odotoken sessions scan [--since ISO-DATE]     # read-only: what CLIs exist here
 odotoken sessions import [--dry-run] [--cli omp|claude|codex|crush] [--since ISO-DATE]
 odotoken sessions stats [--since ISO-DATE] [--by-cli] [--by-model] [--by-project]
+odotoken stats --tps [--since ISO-DATE]       # throughput (TPS/TTFT) breakdown
+odotoken replay [--since ISO-DATE] [--apply]  # re-price history with current prices
+odotoken optimize [--since ISO-DATE] [--project ID]  # cheaper-model suggestions
 ```
 
 ## HTTP API
@@ -137,6 +144,10 @@ Proxy endpoints (same port as the dashboard):
 ```bash
 curl http://127.0.0.1:8090/health
 curl http://127.0.0.1:8090/api/stats?since=2026-10-01T00:00:00
+curl "http://127.0.0.1:8090/api/stats?tag=prod&project=web"   # filters: tag / project / source
+curl http://127.0.0.1:8090/api/tps?interval=1h               # throughput series + summary
+curl http://127.0.0.1:8090/api/forecast                      # cost forecast + anomalies
+curl "http://127.0.0.1:8090/api/export?format=csv"           # CSV export of events
 ```
 
 Token counter API (`odotoken serve`, port 8081):
@@ -198,6 +209,20 @@ Supported CLIs (auto-detected, missing ones are silently skipped):
 | Crush | `~/.local/share/crush/projects.json` → `data_dir/**/*.jsonl` | best-effort JSONL `usage` blocks |
 | Gemini/Antigravity/Amp | `~/.gemini/`, `~/.config/antigravity/`, `~/.config/amp/` | planned via `BaseImporter` — enable in `sessions.enabled=false` until parsers land |
 
+**CLI edge cases**
+
+| Edge case | How odotoken behaves | Recommendation (until a formal contract exists) |
+|-----------|----------------------|--------------------------------------------------|
+| **Locked / busy DB** — `~/.omp/stats.db` exclusive-lock at import time | open with `timeout=5s` + best-effort `SELECT`; busy → retried once, then logged and skipped (no partial writes) | re-run `sessions import`; do not stop the OMP daemon |
+| **Hash collision in Claude** — two different CWDs hash to same `~/.claude/projects/<hash>/` | dir is treated as one project; costs still correct, `project` label may be ambiguous | keep the raw hash in `metadata` and prefer `X-Odo-Project` on proxy traffic |
+| **Missing `usage` blocks** — Claude/Codex line has no `payload.usage` (tool-only turn) | skipped (not a billable turn); not imported | expected — not counted toward cost |
+| **Crush `projects.json` missing / malformed** | importer not detected (`available=false`); `sessions scan` shows placeholder | create the file or set `sessions.paths.crush` |
+| **Codex `workdir` vs `cwd` drift** — history file stores `workdir` but session stores `cwd` | `project` prefers `cwd` → fallback `workdir` → `"default"`; never fails the turn | normalize project names server-side via `X-Odo-Project` where possible |
+| **Stale `--since` (client clock skew / TOML date parsing)** | `since` is string-compared as ISO-8601 UTC; if unparsable, filter is ignored and all rows re-checked by `UNIQUE` dedup | pass explicit `--since 2026-10-01T00:00:00Z` |
+| **Large sessions (50k+ lines) streamed on import** | read line-by-line with `JSONDecodeError` skip per line; corrupt lines logged and skipped | never load the whole file into memory; interrupt mid-import is safe (transaction per chunk) |
+| **God model via env prefix** — same underlying model under `kube`/`pegasus`/`kodeo-*` keys | priced by resolved `model` id, not golem URL prefix; `shadow_cost` follows `catalog.cloud_equivalent` | add `cloud_equivalent` in `src/odotoken/catalog/models.json` when provisioning a new golem |
+| **Privacy + PII in imported messages** | importer only reads token counts + model identifiers; never `content`/`tool_calls` | set `privacy.redact_logs=false` only on trusted local DBs |
+
 Details:
 - **One pricing source** — every imported row is re-priced with `PricingCalculator` (`prices.json`); original `cost_total` is kept in `metadata`.
 - **Deduplication** — `UNIQUE(source, session_file, entry_id)` — rerunning `import` inserts `0` new rows.
@@ -218,6 +243,14 @@ Details:
 | `database.path` | SQLite file (WAL mode) | `odotoken.db` |
 | `token_counter.enabled` | pre-flight counting middleware on the proxy | `true` |
 | `sessions.enabled` / `sessions.paths` | local CLI session import (claude/codex/omp/crush) | `true` / `~/.claude/...` |
+| `limits.projects.<id>` | per-project cost/token caps (same keys as global `limits.*`) | — |
+| `limits.alerts` | alert channels: `slack_url`, `discord_url`, `telegram: {bot_token_env\|bot_token, chat_id}`, `email: {smtp_host, port, to, user_env, pass_env}` | — |
+| `limits.rate_limit` | token bucket per project: `requests_per_min` or `tokens_per_min` (0 = disabled) | disabled |
+| `auth.bearer_token` / `auth.bearer_token_env` / `auth.basic.{user,pass,pass_env}` | dashboard + API auth | disabled |
+| `cache.semantic` | prompt-hash response cache: `enabled`, `ttl_seconds` | disabled |
+| `privacy.block_mode` | reject requests whose body contains PII (HTTP 400 `pii_detected`) | `false` |
+| `providers.<key>.upstream_urls` / `.fallback_url` / `.fallbacks` | round-robin primaries + failover (connection error, non-auth 4xx, 5xx) | — |
+| `otel.enabled` / `otel.endpoint` (or `OTEL_EXPORTER_OTLP_ENDPOINT`) | OpenTelemetry tracing of proxy requests | disabled |
 
 ## Project tags, shadow pricing & privacy
 
@@ -226,6 +259,12 @@ Details:
 - **Privacy** — logs pass through a PII redactor (keys, tokens, emails, CPF/CNPJ, home paths; extend via `privacy.custom_patterns`). `privacy.store_prompts` (default **false**) opts into storing only a SHA-256 hash + 200-char redacted preview per event.
 - **Prometheus** — `GET /metrics` on the proxy port serves text-format metrics; import `examples/grafana-dashboard.json` or run `docker compose -f examples/docker-compose.observability.yml up -d`.
 - **Mock & chaos** — set a provider upstream to `mock://local` for synthetic responses (no network, still metered). Enable `chaos: {enabled: true, rate: 0.05, errors: [429,500], latency_ms: 3000}` to test client resilience; `X-Odo-No-Chaos: true` bypasses.
+- **Freeform tags** — send `X-Odo-Tags: prod,critical` (space- or comma-separated); segment in the dashboard via the **Tag** filter (`/api/stats?tag=<name>`), and `get_summary_by_tag`.
+- **Throughput & forecast** — `GET /api/tps` (TPS/TTFT by model, project, interval) powers the Throughput view; `GET /api/forecast` fits a linear trend to daily cost and flags anomalies on the Overview card.
+- **Alerts** — on `warning`/`breached`, `dispatch_alerts` posts to Slack/Discord/Telegram/SMTP and calls the webhook; per-project alerts fire from `limits.projects`. Configure under `limits.alerts`.
+- **Per-project rate limit** — `limits.rate_limit.requests_per_min` or `tokens_per_min` (0 = disabled) applies a token bucket per `X-Odo-Project` id; excess requests get HTTP 429 with `Retry-After`.
+- **Replay & optimize** — `odotoken replay [--apply]` re-prices history with current `prices.json`; `odotoken optimize` suggests cheaper/equivalent models from recent spend.
+- **Dashboard auth** — `auth.bearer_token`/`auth.basic` in `config.json` gate `/api/*` and the dashboard (Bearer or Basic challenge; unset = open on localhost).
 
 ## Troubleshooting
 
