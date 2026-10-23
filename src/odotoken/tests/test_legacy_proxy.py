@@ -1,18 +1,18 @@
-"""Comprehensive unit and integration test suite for odotoken."""
+"""Legacy proxy/db/pricing/parser/guard smoke — kept for coverage overlap check."""
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
+
 import pytest
 from starlette.testclient import TestClient
 
+from odotoken.dashboard import register_dashboard_routes
 from odotoken.db import Database, TokenEvent
 from odotoken.guard import Guard, GuardLimits
 from odotoken.parser import StreamUsageAccumulator, UsageParser
 from odotoken.pricing import PricingCalculator
 from odotoken.proxy import create_proxy_app
-from odotoken.dashboard import register_dashboard_routes
 
 
 @pytest.fixture

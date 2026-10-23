@@ -70,13 +70,7 @@ def start(
     database = Database(db_path)
 
     limits_cfg = cfg.get("limits", {})
-    guard_limits = GuardLimits(
-        daily_cost_limit_usd=limits_cfg.get("daily_budget_usd"),
-        monthly_cost_limit_usd=limits_cfg.get("monthly_budget_usd"),
-        daily_tokens_limit=limits_cfg.get("daily_tokens_limit"),
-        monthly_tokens_limit=limits_cfg.get("monthly_tokens_limit"),
-        action_on_breach=limits_cfg.get("action_on_breach", "alert"),
-    )
+    guard_limits = GuardLimits.from_dict(limits_cfg)
     guard = Guard(database, guard_limits)
 
     proxy_app = create_proxy_app(database, PricingCalculator(cfg.get("prices", "prices.json")), guard, cfg)
@@ -220,17 +214,41 @@ def stats(
     by_model: bool = typer.Option(False, "--by-model", help="Group by model"),
     by_client: bool = typer.Option(False, "--by-client", help="Group by client app"),
     by_project: bool = typer.Option(False, "--by-project", help="Group by project tag"),
+    tps: bool = typer.Option(False, "--tps", help="Show throughput (TPS) stats"),
     days: int = typer.Option(30, "--days", help="Daily usage history days"),
 ):
-    """Display comprehensive token usage and cost metrics in the terminal."""
     cfg = load_config_file(DEFAULT_CONFIG_PATH)
     db_path = cfg.get("database", {}).get("path", "odotoken.db")
     database = Database(db_path)
 
+    if tps:
+        summary = database.get_tps_summary(since=since)
+        def _fmt(v: float) -> str:
+            return f"{v:.1f} tok/s" if v > 0 else "—"
+        table = Table(title="Throughput (TPS)")
+        table.add_column("Metric", style="cyan")
+        table.add_column("Value", style="green")
+        table.add_row("Avg TPS", _fmt(summary.get("avg_tps", 0)))
+        table.add_row("Peak TPS", _fmt(summary.get("peak_tps", 0)))
+        table.add_row("Avg latency", f"{summary.get('avg_latency_ms', 0):.0f}ms")
+        table.add_row("Requests", str(summary.get("requests", 0)))
+        table.add_row("Completion tokens", f"{summary.get('completion_tokens', 0):,}")
+        console.print(table)
+        by_model = database.get_tps_by_model(since=since)
+        if by_model:
+            mt = Table(title="TPS by Model")
+            mt.add_column("Model", style="cyan")
+            mt.add_column("TPS", justify="right", style="green")
+            mt.add_column("Avg ms", justify="right")
+            mt.add_column("Reqs", justify="right")
+            for r in by_model[:10]:
+                mt.add_row(r["model"], _fmt(r.get("tps", 0)), f"{r.get('avg_latency_ms', 0):.0f}", str(r["requests"]))  # noqa: E501
+            console.print(mt)
+        return
+
     if by_model:
         results = database.get_summary_by_model(since=since)
         table = Table(title="Token Usage by Model")
-        table.add_column("Model", style="cyan")
         table.add_column("Requests", justify="right", style="green")
         table.add_column("Prompt Tokens", justify="right", style="yellow")
         table.add_column("Completion Tokens", justify="right", style="yellow")
@@ -318,6 +336,233 @@ def stats(
                     f"${(row.get('cost_usd') or row.get('total_cost_usd') or 0):.6f}",
                 )
             console.print(day_table)
+
+@app.command()
+def replay(
+    since: str = typer.Option(None, "--since", help="ISO date filter"),
+    project: str = typer.Option(None, "--project", help="Filter by project_id"),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Only print diff, do not update DB"),
+    apply: bool = typer.Option(False, "--apply", help="Write recalculated costs back to DB"),
+):
+    """Recalculate costs with current prices.json and show shadow_cost diff."""
+    from odotoken.services.model_catalog import ModelCatalog
+    cfg = load_config_file(DEFAULT_CONFIG_PATH)
+    db_path = cfg.get("database", {}).get("path", "odotoken.db")
+    database = Database(db_path)
+    price_path = cfg.get("prices", "prices.json") if isinstance(cfg.get("prices"), str) else "prices.json"
+    pricing = PricingCalculator(price_path)
+    catalog = ModelCatalog()
+    events = database.get_recent_events(limit=100000, since=since, project=project)
+    if not events:
+        console.print("[yellow]No events found.[/yellow]")
+        return
+    diffs = []
+    total_old_cost = total_new_cost = total_old_shadow = total_new_shadow = 0.0
+    changed = 0
+    for e in events:
+        old_cost = float(e.get("cost_usd") or 0)
+        old_shadow = float(e.get("shadow_cost") or 0)
+        new_cost = pricing.calculate_cost(
+            e.get("model") or "",
+            int(e.get("prompt_tokens") or 0),
+            int(e.get("completion_tokens") or 0),
+            int(e.get("cache_read_tokens") or 0),
+            int(e.get("cache_write_tokens") or 0),
+        )
+        new_shadow = pricing.calculate_shadow_cost(
+            e.get("model") or "",
+            cloud_equivalent=catalog.get_cloud_equivalent(e.get("model") or ""),
+            prompt_tokens=int(e.get("prompt_tokens") or 0),
+            completion_tokens=int(e.get("completion_tokens") or 0),
+            cache_read_tokens=int(e.get("cache_read_tokens") or 0),
+            cache_write_tokens=int(e.get("cache_write_tokens") or 0),
+        )
+        total_old_cost += old_cost
+        total_new_cost += new_cost
+        total_old_shadow += old_shadow
+        total_new_shadow += new_shadow
+        if abs(new_cost - old_cost) > 1e-9 or abs(new_shadow - old_shadow) > 1e-9:
+            changed += 1
+            diffs.append((e, old_cost, new_cost, old_shadow, new_shadow))
+    console.print(f"[bold]Events: {len(events)}  Changed: {changed}[/bold]")
+    console.print(
+        f"  cost   old=${total_old_cost:.6f}  new=${total_new_cost:.6f}  "
+        f"diff=${total_new_cost - total_old_cost:+.6f}"
+    )
+    console.print(
+        f"  shadow old=${total_old_shadow:.6f}  new=${total_new_shadow:.6f}  "
+        f"diff=${total_new_shadow - total_old_shadow:+.6f}"
+    )
+    if diffs:
+        table = Table(title="Changed rows (first 20)")
+        table.add_column("id", justify="right")
+        table.add_column("model")
+        table.add_column("old cost", justify="right")
+        table.add_column("new cost", justify="right")
+        table.add_column("old shadow", justify="right")
+        table.add_column("new shadow", justify="right")
+        for e, oc, nc, os_, ns in diffs[:20]:
+            table.add_row(
+                str(e.get("id", "")),
+                e.get("model", "")[:30],
+                f"{oc:.6f}",
+                f"{nc:.6f}",
+                f"{os_:.6f}",
+                f"{ns:.6f}",
+            )
+        console.print(table)
+        if len(diffs) > 20:
+            console.print(f"[dim]... and {len(diffs)-20} more[/dim]")
+    should_apply = apply and not dry_run
+    if should_apply and diffs:
+        with database.connection() as conn:
+            for e, _oc, _nc, _os_, _ns in diffs:
+                conn.execute(
+                    "UPDATE token_events SET cost_usd=?, shadow_cost=? WHERE id=?",
+                    (_nc, _ns, e["id"]),
+                )
+            conn.commit()
+        console.print(f"[green]Updated {changed} rows.[/green]")
+    elif not dry_run and not apply and diffs:
+        console.print("[yellow]Dry-run: no DB changes. Use --apply to write back.[/yellow]")
+
+@app.command()
+def optimize(
+    since: str = typer.Option(None, "--since", help="ISO date filter (e.g., 2024-01-01)"),
+    project: str = typer.Option(None, "--project", help="Filter by project_id"),
+):
+    """Analyze usage, suggest cheaper model equivalents and estimated savings."""
+    from odotoken.services.model_catalog import ModelCatalog
+
+    cfg = load_config_file(DEFAULT_CONFIG_PATH)
+    db_path = cfg.get("database", {}).get("path", "odotoken.db")
+    database = Database(db_path)
+    pricing = PricingCalculator(cfg.get("prices", "prices.json") if isinstance(cfg.get("prices"), str) else "prices.json")
+    catalog = ModelCatalog()
+
+    rows = database.get_summary_by_model(since=since, project=project)
+    # filter out empty model key and zero-cost? keep for display but sort by cost desc already
+    rows = [r for r in rows if r.get("model")]
+    if not rows or sum(float(r.get("cost_usd") or 0) for r in rows) == 0:
+        if not rows:
+            console.print("[yellow]No usage data found.[/yellow]")
+        else:
+            console.print("[green]already optimal — no billable usage to optimize.[/green]")
+        return
+
+    top = sorted(rows, key=lambda r: float(r.get("cost_usd") or 0), reverse=True)[:3]
+
+    # fallback generic cheap model (cheapest cloud model in pricing)
+    generic = "gpt-4o-mini"
+
+    suggestions: list[dict] = []
+    for r in top:
+        model_id: str = r["model"]
+        cost = float(r.get("cost_usd") or 0)
+        if cost <= 0:
+            continue
+        prompt = int(r.get("prompt_tokens") or 0)
+        completion = int(r.get("completion_tokens") or 0)
+        cache_r = int(r.get("cache_read_tokens") or 0)
+        cache_w = int(r.get("cache_write_tokens") or 0)
+        hints = []
+        ratio = (completion / prompt) if prompt else 0
+        if ratio > 4:
+            hints.append(f"high completion:prompt ratio ({ratio:.1f}x)")
+        tok_total = prompt + completion + cache_r + cache_w
+        if tok_total and (cache_r / tok_total) > 0.5:
+            hints.append(f"high cache-read usage ({cache_r/tok_total:.0%})")
+        hint = "; ".join(hints)
+
+        alt: str | None = None
+        # 1) same-family cheapest via catalog
+        alts = catalog.get_cheaper_alternatives(model_id)
+        if alts:
+            alt = alts[0].id
+        else:
+            # 2) cloud_equivalent if cheaper
+            ce = catalog.get_cloud_equivalent(model_id)
+            if ce and ce.lower() != model_id.lower():
+                ce_cost = pricing.calculate_cost(ce, prompt, completion, cache_r, cache_w)
+                if ce_cost < cost - 1e-9:
+                    alt = ce
+        # 3) generic gpt-4o-mini if cheaper and not self
+        if alt is None and model_id.lower() != generic.lower():
+            gen_cost = pricing.calculate_cost(generic, prompt, completion, cache_r, cache_w)
+            if gen_cost < cost - 1e-9:
+                # ensure generic exists pricing wise (it always does)
+                alt = generic
+
+        if alt is None:
+            continue
+        alt_cost = pricing.calculate_cost(alt, prompt, completion, cache_r, cache_w)
+        saving = cost - alt_cost
+        if saving <= 1e-9:
+            continue
+        pct = (saving / cost * 100) if cost else 0
+        suggestions.append(
+            {
+                "model": model_id,
+                "requests": r.get("requests") or r.get("request_count") or 0,
+                "cost": cost,
+                "alt": alt,
+                "alt_cost": alt_cost,
+                "saving": saving,
+                "pct": pct,
+                "prompt": prompt,
+                "completion": completion,
+                "hint": hint,
+            }
+        )
+
+    if not suggestions:
+        console.print("[green]already optimal — no cheaper alternatives found for your top models.[/green]")
+        # still show what top models are for transparency
+        t = Table(title="Top models by cost (no cheaper alternative)")
+        t.add_column("Model", style="cyan")
+        t.add_column("Requests", justify="right")
+        t.add_column("Cost (USD)", justify="right", style="red")
+        for r in top:
+            t.add_row(str(r["model"]), str(r.get("requests") or r.get("request_count") or 0), f"${float(r.get('cost_usd') or 0):.6f}")
+        console.print(t)
+        return
+
+    table = Table(title="Optimization suggestions (top 3 by cost)")
+    table.add_column("Model", style="cyan")
+    table.add_column("Reqs", justify="right")
+    table.add_column("Cost", justify="right", style="red")
+    table.add_column("Suggested", style="green")
+    table.add_column("Est. cost", justify="right")
+    table.add_column("Saving", justify="right", style="green")
+    table.add_column("Save %", justify="right", style="green")
+    table.add_column("Notes", justify="left", style="dim")
+    total_saving = 0.0
+    for s in suggestions:
+        total_saving += s["saving"]
+        table.add_row(
+            s["model"][:32],
+            str(s["requests"]),
+            f"${s['cost']:.6f}",
+            s["alt"],
+            f"${s['alt_cost']:.6f}",
+            f"${s['saving']:.6f}",
+            f"{s['pct']:.1f}%",
+            s.get("hint") or "",
+        )
+    console.print(table)
+    if len(suggestions) == 1:
+        s = suggestions[0]
+        console.print(f"[dim]Example: replace [cyan]{s['model']}[/cyan] → [green]{s['alt']}[/green] to save ~${s['saving']:.6f} ({s['pct']:.1f}%).[/dim]")
+    else:
+        console.print(f"[bold green]Potential saving if all applied: ${total_saving:.6f}[/bold green]")
+    # hint about since/project filters
+    filt = []
+    if since:
+        filt.append(f"since={since}")
+    if project:
+        filt.append(f"project={project}")
+    if filt:
+        console.print(f"[dim]Filters: {', '.join(filt)}[/dim]")
 
 @app.command()
 def log(limit: int = typer.Option(20, "--limit", "-n", help="Number of recent records")):

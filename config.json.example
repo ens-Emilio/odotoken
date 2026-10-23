@@ -40,13 +40,61 @@
     }
   },
   "limits": {
-    "monthly_budget_usd": 0.0,
-    "monthly_token_budget": 0,
-    "alert_percent": 80,
-    "block_on_budget_exceeded": false
+    "daily_cost_limit_usd": 10.0,
+    "monthly_cost_limit_usd": 100.0,
+    "daily_tokens_limit": 50000,
+    "monthly_tokens_limit": 500000,
+    "action_on_breach": "alert",
+    "projects": {
+      "my-app": {
+        "daily_cost_limit_usd": 5.0,
+        "monthly_cost_limit_usd": 50.0,
+        "daily_tokens_limit": 20000,
+        "action_on_breach": "block"
+      },
+      "experiment": {
+        "daily_cost_limit_usd": 2.0,
+        "action_on_breach": "alert"
+      }
+    },
+    "rate_limit": {
+      "requests_per_min": 0,
+      "tokens_per_min": 0
+    },
+    "alerts": {
+      "slack_url": "",
+      "discord_url": "",
+      "telegram": {
+        "bot_token_env": "ODO_TELEGRAM_TOKEN",
+        "chat_id": ""
+      },
+      "email": {
+        "smtp_host": "",
+        "port": 587,
+        "to": "",
+        "user_env": "ODO_SMTP_USER",
+        "pass_env": "ODO_SMTP_PASS"
+      }
+    }
+  },
+  "cache": {
+    "semantic": {
+      "enabled": false,
+      "ttl_seconds": 3600
+    }
+  },
+  "auth": {
+    "bearer_token_env": "ODO_DASH_TOKEN",
+    "basic": {
+      "user": "",
+      "pass_env": "ODO_DASH_PASS"
+    }
+  },
+  "otel": {
+    "enabled": false,
+    "endpoint": "http://127.0.0.1:4317"
   },
   "database": {
-    "path": "odotoken.db"
   },
   "token_counter": {
     "enabled": true,
@@ -87,6 +135,7 @@
   "privacy": {
     "redact_logs": true,
     "store_prompts": false,
+    "block_mode": false,
     "custom_patterns": []
   },
   "sessions": {

@@ -18,6 +18,7 @@ DEFAULT_PRICES: dict[str, dict[str, float]] = {
     "o3-mini": {"input": 1.10, "output": 4.40, "cache_read": 0.55, "cache_write": 0.0},
     # Google Gemini models
     "gemini-2.0-flash": {"input": 0.10, "output": 0.40, "cache_read": 0.025, "cache_write": 0.0},
+    "gemini-1.5-flash": {"input": 0.075, "output": 0.30, "cache_read": 0.01875, "cache_write": 0.0},
     "gemini-1.5-pro": {"input": 1.25, "output": 5.0, "cache_read": 0.3125, "cache_write": 0.0},
     # Local / Ollama / Default fallback
     "default": {"input": 0.0, "output": 0.0, "cache_read": 0.0, "cache_write": 0.0},

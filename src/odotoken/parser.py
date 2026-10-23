@@ -32,7 +32,40 @@ class UsageParser:
             return "ollama"
         # Default standard OpenAI compatibility
         return "openai"
-
+    @staticmethod
+    def infer_provider_from_model(model: str) -> str | None:
+        """Infer real provider from model name prefix. Returns None if unknown."""
+        m = model.lower().strip()
+        if not m or m == "unknown":
+            return None
+        # Anthropic
+        if m.startswith("claude"):
+            return "anthropic"
+        # OpenAI
+        if m.startswith(("gpt-", "o1", "o3", "o4")):
+            return "openai"
+        # Google
+        if m.startswith(("gemini", "palm")):
+            return "gemini"
+        # DeepSeek
+        if m.startswith("deepseek"):
+            return "deepseek"
+        # Meta
+        if m.startswith("llama"):
+            return "meta"
+        # Mistral
+        if m.startswith(("mistral", "mixtral", "codestral")):
+            return "mistral"
+        # Qwen
+        if m.startswith("qwen"):
+            return "qwen"
+        # Cohere
+        if m.startswith(("command-r", "command-light")):
+            return "cohere"
+        # xAI
+        if m.startswith("grok"):
+            return "xai"
+        return None
     @staticmethod
     def identify_client_app(headers: dict[str, str]) -> str:
         """Infer client app name from User-Agent or custom headers."""
@@ -42,21 +75,30 @@ class UsageParser:
 
         ua = headers.get("user-agent", "").lower()
         if "pi-agent" in ua or "pi agent" in ua:
-            return "pi agent"
-        if "pi" in ua:
-            return "pi agent"
+            return "pi"
         if "omp" in ua:
             return "omp"
         if "opencode" in ua:
             return "opencode"
+        if "omo" in ua:
+            return "omo"
+        if "amp" in ua:
+            return "amp"
+        if "goose" in ua:
+            return "goose"
+        if "continue" in ua:
+            return "continue"
         if "claude" in ua:
-            return "claude-client"
+            return "claude"
+        if "codex" in ua:
+            return "codex"
         if "curl" in ua:
             return "curl"
         if "python" in ua or "httpx" in ua:
             return "python-client"
 
         return "unknown"
+
 
     @classmethod
     def parse_json_response(
@@ -124,6 +166,12 @@ class StreamUsageAccumulator:
         self.cache_read_tokens = 0
         self.cache_write_tokens = 0
         self._buffer = ""
+        self.t_first_chunk_ms: float | None = None  # set via mark_first_chunk()
+
+    def mark_first_chunk(self, elapsed_ms: float) -> None:
+        """Record TTFT when first byte/chunk arrives. No-op if already set."""
+        if self.t_first_chunk_ms is None:
+            self.t_first_chunk_ms = elapsed_ms
 
     def process_chunk(self, chunk: bytes | str) -> None:
         if isinstance(chunk, bytes):

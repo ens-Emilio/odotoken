@@ -19,6 +19,12 @@ def create_app(config_path: str = "config.json") -> FastAPI:
     """Create and configure FastAPI application."""
     # Load configuration
     config = load_config(config_path)
+    try:
+        from odotoken.infra.otel import init_tracing
+
+        init_tracing(config)
+    except Exception:
+        pass
     tc_config = get_token_counter_config(config)
 
     # Setup logging

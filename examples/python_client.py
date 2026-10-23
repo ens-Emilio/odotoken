@@ -2,8 +2,8 @@
 """Python client example for odotoken token counter API."""
 
 import asyncio
+
 import httpx
-from typing import Optional
 
 
 class TokenCounterClient:
@@ -16,7 +16,7 @@ class TokenCounterClient:
     async def close(self):
         await self.client.aclose()
 
-    async def count_text(self, model: str, text: str, provider: Optional[str] = None) -> dict:
+    async def count_text(self, model: str, text: str, provider: str | None = None) -> dict:
         """Count tokens for plain text."""
         payload = {"model": model, "text": text}
         if provider:
@@ -29,8 +29,8 @@ class TokenCounterClient:
         self,
         model: str,
         messages: list[dict],
-        provider: Optional[str] = None,
-        tools: Optional[list[dict]] = None,
+        provider: str | None = None,
+        tools: list[dict] | None = None,
     ) -> dict:
         """Count tokens for chat messages."""
         payload = {"model": model, "messages": messages}
@@ -48,7 +48,7 @@ class TokenCounterClient:
         response.raise_for_status()
         return response.json()
 
-    async def list_models(self, provider: Optional[str] = None) -> dict:
+    async def list_models(self, provider: str | None = None) -> dict:
         """List supported models."""
         url = f"{self.base_url}/v1/models"
         if provider:
