@@ -12,7 +12,7 @@ import (
 
 	_ "github.com/mattn/go-sqlite3"
 
-	"github.com/user/odotoken/internal/domain"
+	"github.com/ens-Emilio/odotoken/internal/domain"
 )
 
 // ClaudeImporter imports from Claude CLI session files (~/.claude/projects/<hash>/<session>.jsonl).

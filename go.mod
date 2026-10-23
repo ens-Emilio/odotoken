@@ -1,4 +1,4 @@
-module github.com/user/odotoken
+module github.com/ens-Emilio/odotoken
 
 go 1.24.0
 

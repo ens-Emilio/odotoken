@@ -10,12 +10,12 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 
-	"github.com/user/odotoken/internal/api"
-	"github.com/user/odotoken/internal/config"
-	"github.com/user/odotoken/internal/db"
-	"github.com/user/odotoken/internal/guard"
-	"github.com/user/odotoken/internal/pricing"
-	"github.com/user/odotoken/internal/proxy"
+	"github.com/ens-Emilio/odotoken/internal/api"
+	"github.com/ens-Emilio/odotoken/internal/config"
+	"github.com/ens-Emilio/odotoken/internal/db"
+	"github.com/ens-Emilio/odotoken/internal/guard"
+	"github.com/ens-Emilio/odotoken/internal/pricing"
+	"github.com/ens-Emilio/odotoken/internal/proxy"
 )
 
 // Server holds all wired components.

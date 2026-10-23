@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/user/odotoken/internal/domain"
+	"github.com/ens-Emilio/odotoken/internal/domain"
 )
 
 // IdentifyProvider detects the LLM provider from request path and headers.

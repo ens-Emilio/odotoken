@@ -8,9 +8,9 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/pkoukk/tiktoken-go"
 
-	"github.com/user/odotoken/internal/config"
-	"github.com/user/odotoken/internal/domain"
-	"github.com/user/odotoken/internal/pricing"
+	"github.com/ens-Emilio/odotoken/internal/config"
+	"github.com/ens-Emilio/odotoken/internal/domain"
+	"github.com/ens-Emilio/odotoken/internal/pricing"
 )
 
 // CountTextRequest is the JSON body for /v1/count with text.

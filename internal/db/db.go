@@ -8,7 +8,7 @@ import (
 
 	_ "modernc.org/sqlite"
 
-	"github.com/user/odotoken/internal/domain"
+	"github.com/ens-Emilio/odotoken/internal/domain"
 )
 
 const schema = `

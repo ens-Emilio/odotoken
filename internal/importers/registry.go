@@ -1,7 +1,7 @@
 package importers
 
 import (
-	"github.com/user/odotoken/internal/domain"
+	"github.com/ens-Emilio/odotoken/internal/domain"
 )
 
 // Importer defines the contract for session file importers.

@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/user/odotoken/internal/db"
+	"github.com/ens-Emilio/odotoken/internal/db"
 )
 
 // DashboardRouter creates the /api router for dashboard endpoints.

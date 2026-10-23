@@ -13,11 +13,11 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/user/odotoken/internal/config"
-	"github.com/user/odotoken/internal/db"
-	"github.com/user/odotoken/internal/domain"
-	"github.com/user/odotoken/internal/importers"
-	"github.com/user/odotoken/internal/server"
+	"github.com/ens-Emilio/odotoken/internal/config"
+	"github.com/ens-Emilio/odotoken/internal/db"
+	"github.com/ens-Emilio/odotoken/internal/domain"
+	"github.com/ens-Emilio/odotoken/internal/importers"
+	"github.com/ens-Emilio/odotoken/internal/server"
 )
 
 func newStartCmd() *cobra.Command {
