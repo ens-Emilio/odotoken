@@ -18,6 +18,9 @@ jobs:
         with:
           go-version: '1.24'
           cache: true
+      - name: Download dependencies
+        run: go mod download
+
 
       - name: Run linter
         uses: golangci/golangci-lint-action@v6

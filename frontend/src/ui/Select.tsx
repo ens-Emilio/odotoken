@@ -117,7 +117,7 @@ export function Select({ value, onChange, options, placeholder = 'Select…', di
                   {group.options.map(opt => (
                     <li
                       key={opt.value}
-                      role="option"
+                      data-role="option"
                       aria-selected={opt.value === value}
                       onClick={() => { onChange(opt.value); close() }}
  className="select-option"
@@ -131,7 +131,7 @@ export function Select({ value, onChange, options, placeholder = 'Select…', di
             : (options as SelectOption[]).map(opt => (
                 <li
                   key={opt.value}
-                  role="option"
+                  data-role="option"
                   aria-selected={opt.value === value}
                   onClick={() => { onChange(opt.value); close() }}
  className="select-option"
