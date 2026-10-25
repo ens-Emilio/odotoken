@@ -5,7 +5,7 @@ import (
 	"os"
 )
 
-// DefaultConfig returns sensible defaults.
+// DefaultConfig returns safe local-first defaults.
 func DefaultConfig() Config {
 	return Config{
 		TokenCounter: TokenCounterConfig{
@@ -22,6 +22,10 @@ func DefaultConfig() Config {
 		},
 		Guard: GuardConfig{
 			WarningThresholdPct: 80.0,
+			ActionOnBreach:      "block",
+		},
+		Server: ServerConfig{
+			BindHost: "127.0.0.1",
 		},
 	}
 }
@@ -46,10 +50,29 @@ func Load(path string) (Config, error) {
 	}
 
 	applyEnvOverrides(&cfg)
+	if cfg.Server.BindHost == "" {
+		cfg.Server.BindHost = "127.0.0.1"
+	}
 	return cfg, nil
 }
 
 func applyEnvOverrides(cfg *Config) {
+	// API key and alert credentials resolve from env so they do not sit in a
+	// world-readable config file.
+	if cfg.Server.APIKey == "" {
+		if key := os.Getenv("ODO_API_KEY"); key != "" {
+			cfg.Server.APIKey = key
+		}
+	}
+	if cfg.Alerts.Telegram.BotToken == "" && cfg.Alerts.Telegram.BotTokenEnv != "" {
+		cfg.Alerts.Telegram.BotToken = os.Getenv(cfg.Alerts.Telegram.BotTokenEnv)
+	}
+	if cfg.Alerts.Email.Username == "" {
+		cfg.Alerts.Email.Username = os.Getenv("ODO_SMTP_USER")
+	}
+	if cfg.Alerts.Email.Password == "" {
+		cfg.Alerts.Email.Password = os.Getenv("ODO_SMTP_PASS")
+	}
 	for name, prov := range cfg.TokenCounter.Providers {
 		if prov.APIKeyEnv != "" {
 			if key := os.Getenv(prov.APIKeyEnv); key != "" {

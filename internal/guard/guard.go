@@ -8,6 +8,8 @@ import (
 	"net/smtp"
 	"strconv"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/ens-Emilio/odotoken/internal/config"
 	"github.com/ens-Emilio/odotoken/internal/db"
@@ -17,58 +19,152 @@ import (
 // Guard enforces budget limits.
 type Guard struct {
 	db     *db.Database
-	limits config.GuardConfig
 	alerts config.AlertsConfig
 	logger *slog.Logger
+
+	limitsMu     sync.RWMutex
+	limits       config.GuardConfig
+	alertMu      sync.Mutex
+	lastAlertKey string
+	httpClient   *http.Client
 }
 
 // New creates a new Guard.
 func New(database *db.Database, limits config.GuardConfig, alerts config.AlertsConfig, logger *slog.Logger) *Guard {
-	return &Guard{db: database, limits: limits, alerts: alerts, logger: logger}
+	return &Guard{
+		db:         database,
+		limits:     limits,
+		alerts:     alerts,
+		logger:     logger,
+		httpClient: &http.Client{Timeout: 10 * time.Second},
+	}
+}
+
+// Limits returns the current budget limits.
+func (g *Guard) Limits() config.GuardConfig {
+	g.limitsMu.RLock()
+	defer g.limitsMu.RUnlock()
+	return g.limits
+}
+
+// UpdateLimits replaces the in-memory limits. Persistence is owned by the
+// caller, which also knows the config path.
+func (g *Guard) UpdateLimits(limits config.GuardConfig) {
+	g.limitsMu.Lock()
+	g.limits = limits
+	g.limitsMu.Unlock()
+	g.alertMu.Lock()
+	g.lastAlertKey = ""
+	g.alertMu.Unlock()
 }
 
 // Check verifies if a request is allowed under current budget limits.
+//
+// A failure to read the budget fails OPEN: the request is allowed and the
+// error is logged. The guard meters spend; it does not protect an upstream, so
+// a SQLite hiccup must not take the proxy down for every caller. If a hard
+// stop on unreadable budgets is ever wanted, it belongs behind an explicit
+// config switch rather than as an implicit consequence of a disk error.
 func (g *Guard) Check(projectID string) domain.GuardCheckResult {
-	summary, err := g.db.GetCostSummary(projectID)
+	limits := g.Limits()
+	loc, err := time.LoadLocation(limits.Timezone)
 	if err != nil {
-		g.logger.Error("guard check failed", "error", err)
+		if limits.Timezone != "" {
+			g.logger.Warn("invalid guard timezone, using UTC", "timezone", limits.Timezone, "error", err)
+		}
+		loc = time.UTC
+	}
+	summary, err := g.db.GetCostSummaryInLocation(projectID, loc)
+	if err != nil {
+		g.logger.Error("guard check failed, allowing request (fail-open)", "error", err)
 		return domain.GuardCheckResult{Allowed: true, Status: "ok"}
 	}
 
 	result := domain.GuardCheckResult{
-		Allowed:            true,
-		Status:             "ok",
-		CurrentDailyCost:   summary.DailyCostUSD,
-		DailyLimit:         g.limits.DailyCostLimitUSD,
-		CurrentMonthlyCost: summary.MonthlyCostUSD,
-		MonthlyLimit:       g.limits.MonthlyCostLimitUSD,
-		CurrentDailyTokens: summary.DailyTokens,
-		CurrentMonthTokens: summary.MonthlyTokens,
+		Allowed:             true,
+		Status:              "ok",
+		CurrentDailyCost:    summary.DailyCostUSD,
+		DailyLimit:          limits.DailyCostLimitUSD,
+		CurrentMonthlyCost:  summary.MonthlyCostUSD,
+		MonthlyLimit:        limits.MonthlyCostLimitUSD,
+		CurrentDailyTokens:  summary.DailyTokens,
+		CurrentMonthTokens:  summary.MonthlyTokens,
+		DailyTokensLimit:    limits.DailyTokenLimit,
+		MonthlyTokensLimit:  limits.MonthlyTokenLimit,
+		WarningThresholdPct: limits.WarningThresholdPct,
+		ActionOnBreach:      limits.ActionOnBreach,
 	}
 
-	warnPct := g.limits.WarningThresholdPct
+	warnPct := limits.WarningThresholdPct
 	if warnPct <= 0 {
 		warnPct = 80.0
 	}
 
-	if g.limits.DailyCostLimitUSD > 0 && summary.DailyCostUSD >= g.limits.DailyCostLimitUSD {
+	// Cost limits
+	if limits.DailyCostLimitUSD > 0 && summary.DailyCostUSD >= limits.DailyCostLimitUSD {
 		result.Allowed = false
 		result.Status = "breached"
-		result.Message = fmt.Sprintf("daily cost limit breached: $%.4f / $%.2f", summary.DailyCostUSD, g.limits.DailyCostLimitUSD)
-	} else if g.limits.MonthlyCostLimitUSD > 0 && summary.MonthlyCostUSD >= g.limits.MonthlyCostLimitUSD {
+		result.Message = fmt.Sprintf("daily cost limit breached: $%.4f / $%.2f", summary.DailyCostUSD, limits.DailyCostLimitUSD)
+	} else if limits.MonthlyCostLimitUSD > 0 && summary.MonthlyCostUSD >= limits.MonthlyCostLimitUSD {
 		result.Allowed = false
 		result.Status = "breached"
-		result.Message = fmt.Sprintf("monthly cost limit breached: $%.4f / $%.2f", summary.MonthlyCostUSD, g.limits.MonthlyCostLimitUSD)
-	} else if g.limits.DailyCostLimitUSD > 0 && summary.DailyCostUSD >= g.limits.DailyCostLimitUSD*warnPct/100 {
+		result.Message = fmt.Sprintf("monthly cost limit breached: $%.4f / $%.2f", summary.MonthlyCostUSD, limits.MonthlyCostLimitUSD)
+	} else if limits.DailyCostLimitUSD > 0 && summary.DailyCostUSD >= limits.DailyCostLimitUSD*warnPct/100 {
 		result.Status = "warning"
-		result.Message = fmt.Sprintf("daily cost warning: $%.4f / $%.2f (%.0f%%)", summary.DailyCostUSD, g.limits.DailyCostLimitUSD, warnPct)
-	} else if g.limits.MonthlyCostLimitUSD > 0 && summary.MonthlyCostUSD >= g.limits.MonthlyCostLimitUSD*warnPct/100 {
+		result.Message = fmt.Sprintf("daily cost warning: $%.4f / $%.2f (%.0f%%)", summary.DailyCostUSD, limits.DailyCostLimitUSD, warnPct)
+	} else if limits.MonthlyCostLimitUSD > 0 && summary.MonthlyCostUSD >= limits.MonthlyCostLimitUSD*warnPct/100 {
 		result.Status = "warning"
-		result.Message = fmt.Sprintf("monthly cost warning: $%.4f / $%.2f (%.0f%%)", summary.MonthlyCostUSD, g.limits.MonthlyCostLimitUSD, warnPct)
+		result.Message = fmt.Sprintf("monthly cost warning: $%.4f / $%.2f (%.0f%%)", summary.MonthlyCostUSD, limits.MonthlyCostLimitUSD, warnPct)
 	}
 
+	// Token limits (only if not already breached by cost)
+	if result.Status != "breached" {
+		if limits.DailyTokenLimit > 0 && summary.DailyTokens >= limits.DailyTokenLimit {
+			result.Allowed = false
+			result.Status = "breached"
+			result.Message = fmt.Sprintf("daily token limit breached: %d / %d", summary.DailyTokens, limits.DailyTokenLimit)
+		} else if limits.MonthlyTokenLimit > 0 && summary.MonthlyTokens >= limits.MonthlyTokenLimit {
+			result.Allowed = false
+			result.Status = "breached"
+			result.Message = fmt.Sprintf("monthly token limit breached: %d / %d", summary.MonthlyTokens, limits.MonthlyTokenLimit)
+		} else if limits.DailyTokenLimit > 0 && float64(summary.DailyTokens) >= float64(limits.DailyTokenLimit)*warnPct/100 {
+			result.Status = "warning"
+			result.Message = fmt.Sprintf("daily token warning: %d / %d (%.0f%%)", summary.DailyTokens, limits.DailyTokenLimit, warnPct)
+		} else if limits.MonthlyTokenLimit > 0 && float64(summary.MonthlyTokens) >= float64(limits.MonthlyTokenLimit)*warnPct/100 {
+			result.Status = "warning"
+			result.Message = fmt.Sprintf("monthly token warning: %d / %d (%.0f%%)", summary.MonthlyTokens, limits.MonthlyTokenLimit, warnPct)
+		}
+	}
+
+	if result.Status == "breached" {
+		result.Allowed = result.ActionOnBreach != "block"
+	}
+
+	// Alert only on state transition (ok -> warning/breached, or warning -> breached)
 	if result.Status != "ok" {
-		go g.dispatchAlerts(result)
+		alertKey := result.Status + ":" + result.Message
+		g.alertMu.Lock()
+		if alertKey != g.lastAlertKey {
+			g.lastAlertKey = alertKey
+			g.alertMu.Unlock()
+			if err := g.db.InsertGuardEvent(db.GuardEvent{
+				Timestamp:      time.Now().UTC().Format(time.RFC3339Nano),
+				Status:         result.Status,
+				Message:        result.Message,
+				Action:         result.ActionOnBreach,
+				DailyCostUSD:   result.CurrentDailyCost,
+				MonthlyCostUSD: result.CurrentMonthlyCost,
+			}); err != nil {
+				g.logger.Warn("could not persist guard transition", "error", err)
+			}
+			go g.dispatchAlerts(result)
+		} else {
+			g.alertMu.Unlock()
+		}
+	} else {
+		g.alertMu.Lock()
+		g.lastAlertKey = ""
+		g.alertMu.Unlock()
 	}
 
 	return result
@@ -78,16 +174,16 @@ func (g *Guard) dispatchAlerts(result domain.GuardCheckResult) {
 	text := formatAlertText(result)
 
 	if g.alerts.SlackURL != "" {
-		sendWebhook(g.alerts.SlackURL, text)
+		g.sendWebhook(g.alerts.SlackURL, text)
 	}
 	if g.alerts.DiscordURL != "" {
-		sendWebhook(g.alerts.DiscordURL, text)
+		g.sendWebhook(g.alerts.DiscordURL, text)
 	}
 	if g.alerts.Telegram.BotToken != "" && g.alerts.Telegram.ChatID != "" {
-		sendTelegram(g.alerts.Telegram, text)
+		g.sendTelegram(g.alerts.Telegram, text)
 	}
 	if g.alerts.Email.SMTPHost != "" {
-		sendEmail(g.alerts.Email, text)
+		g.sendEmail(g.alerts.Email, text)
 	}
 }
 
@@ -96,35 +192,36 @@ func formatAlertText(r domain.GuardCheckResult) string {
 	if r.Status == "breached" {
 		icon = "🚨"
 	}
-	return fmt.Sprintf("%s odotoken alert: %s\nDaily: $%.4f | Monthly: $%.4f", icon, r.Message, r.CurrentDailyCost, r.CurrentMonthlyCost)
+	return fmt.Sprintf("%s odotoken alert: %s\nDaily: $%.4f | Monthly: $%.4f | DailyTokens: %d | MonthlyTokens: %d",
+		icon, r.Message, r.CurrentDailyCost, r.CurrentMonthlyCost, r.CurrentDailyTokens, r.CurrentMonthTokens)
 }
 
-func sendWebhook(url, text string) {
-	resp, err := http.Post(url, "application/json", strings.NewReader(fmt.Sprintf(`{"text":%q}`, text)))
+func (g *Guard) sendWebhook(url, text string) {
+	resp, err := g.httpClient.Post(url, "application/json", strings.NewReader(fmt.Sprintf(`{"text":%q}`, text)))
 	if err != nil {
-		slog.Warn("webhook alert failed", "url", url, "error", err)
+		g.logger.Warn("webhook alert failed", "url", url, "error", err)
 		return
 	}
 	resp.Body.Close()
 }
 
-func sendTelegram(cfg config.TelegramConfig, text string) {
+func (g *Guard) sendTelegram(cfg config.TelegramConfig, text string) {
 	apiURL := fmt.Sprintf("https://api.telegram.org/bot%s/sendMessage", cfg.BotToken)
 	body := fmt.Sprintf(`{"chat_id":%q,"text":%q}`, cfg.ChatID, text)
-	resp, err := http.Post(apiURL, "application/json", strings.NewReader(body))
+	resp, err := g.httpClient.Post(apiURL, "application/json", strings.NewReader(body))
 	if err != nil {
-		slog.Warn("telegram alert failed", "error", err)
+		g.logger.Warn("telegram alert failed", "error", err)
 		return
 	}
 	resp.Body.Close()
 }
 
-func sendEmail(cfg config.EmailConfig, text string) {
+func (g *Guard) sendEmail(cfg config.EmailConfig, text string) {
 	addr := net.JoinHostPort(cfg.SMTPHost, strconv.Itoa(cfg.SMTPPort))
 	auth := smtp.PlainAuth("", cfg.Username, cfg.Password, cfg.SMTPHost)
 	msg := fmt.Sprintf("From: %s\r\nTo: %s\r\nSubject: odotoken alert\r\n\r\n%s", cfg.FromAddr, cfg.ToAddr, text)
 	err := smtp.SendMail(addr, auth, cfg.FromAddr, []string{cfg.ToAddr}, []byte(msg))
 	if err != nil {
-		slog.Warn("email alert failed", "error", err)
+		g.logger.Warn("email alert failed", "error", err)
 	}
 }

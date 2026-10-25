@@ -53,10 +53,24 @@ func NewCalculator(priceFile string) *Calculator {
 	return c
 }
 
+// HasExplicitPrice reports whether a model has a real catalog price. Falling
+// back to default ($0) is not a valid cost signal.
+func (c *Calculator) HasExplicitPrice(model string) bool {
+	if _, ok := c.prices[model]; ok {
+		return true
+	}
+	for prefix := range c.prices {
+		if prefix != "default" && strings.HasPrefix(model, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
 // GetModelRates finds the best matching rates for a model name.
 func (c *Calculator) GetModelRates(model string) ModelRates {
-	if r, ok := c.prices[model]; ok {
-		return r
+	if rates, ok := c.prices[model]; ok {
+		return rates
 	}
 	for prefix, rates := range c.prices {
 		if prefix != "default" && strings.HasPrefix(model, prefix) {

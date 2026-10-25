@@ -105,12 +105,46 @@ func ParseJSONResponse(provider string, data map[string]interface{}, fallbackMod
 	case "ollama":
 		res.PromptTokens = toInt(data["prompt_eval_count"])
 		res.CompletionTokens = toInt(data["eval_count"])
+	default:
+		// Named relay providers such as ghostcli and kodeo speak the OpenAI
+		// response shape. Without this fallback their exact usage was replaced
+		// by a body-size estimate.
+		if usage, ok := data["usage"].(map[string]interface{}); ok {
+			res.PromptTokens = toInt(usage["prompt_tokens"])
+			res.CompletionTokens = toInt(usage["completion_tokens"])
+			res.TotalTokens = toInt(usage["total_tokens"])
+			if details, ok := usage["prompt_tokens_details"].(map[string]interface{}); ok {
+				res.CacheReadTokens = toInt(details["cached_tokens"])
+			}
+		}
 	}
 
 	if res.TotalTokens == 0 {
 		res.TotalTokens = res.PromptTokens + res.CompletionTokens
 	}
 	return res
+}
+
+// maxPlausiblePromptTokens is deliberately far above current hosted context
+// windows. Relays sometimes report large but legitimate agent histories, so a
+// threshold near normal context sizes would discard real usage.
+const maxPlausiblePromptTokens = 10_000_000
+
+// SanitizeUsage drops only a usage block that is impossible for any hosted
+// model. Valid large prompts, including long agent sessions, are preserved.
+func SanitizeUsage(u domain.UsageResult) domain.UsageResult {
+	if u.PromptTokens < 0 || u.CompletionTokens < 0 || u.CacheReadTokens < 0 || u.CacheWriteTokens < 0 ||
+		u.PromptTokens > maxPlausiblePromptTokens || u.TotalTokens > 2*maxPlausiblePromptTokens {
+		u.PromptTokens = 0
+		u.CacheReadTokens = 0
+		u.CacheWriteTokens = 0
+		u.TotalTokens = u.CompletionTokens
+		u.Estimated = true
+	}
+	if u.TotalTokens == 0 {
+		u.TotalTokens = u.PromptTokens + u.CompletionTokens
+	}
+	return u
 }
 
 // StreamUsageAccumulator accumulates SSE chunks across streaming responses.
@@ -122,10 +156,12 @@ type StreamUsageAccumulator struct {
 	totalTokens      int
 	cacheReadTokens  int
 	cacheWriteTokens int
+	contentChars     int
 	chunkCount       int
 	firstChunkTime   time.Time
 	startTime        time.Time
 	hasFirstChunk    bool
+	pending          []byte
 }
 
 // NewStreamAccumulator creates a new accumulator for a given provider.
@@ -135,6 +171,24 @@ func NewStreamAccumulator(provider, defaultModel string) *StreamUsageAccumulator
 		model:     defaultModel,
 		startTime: time.Now(),
 	}
+}
+
+// Write makes the accumulator an io.Writer so a stream can be counted as it is
+// read. Chunk boundaries from the network fall anywhere, including mid-line,
+// so a partial trailing line is held until its newline arrives; feeding
+// fragments straight to ProcessChunk would drop the usage block of whichever
+// chunk happened to split it.
+func (s *StreamUsageAccumulator) Write(p []byte) (int, error) {
+	s.pending = append(s.pending, p...)
+	for {
+		i := bytes.IndexByte(s.pending, '\n')
+		if i < 0 {
+			break
+		}
+		s.ProcessChunk(s.pending[:i])
+		s.pending = s.pending[i+1:]
+	}
+	return len(p), nil
 }
 
 // ProcessChunk parses an SSE chunk and accumulates usage data.
@@ -206,6 +260,30 @@ func (s *StreamUsageAccumulator) handleOpenAIEvent(data map[string]interface{}) 
 			s.cacheReadTokens = toInt(details["cached_tokens"])
 		}
 	}
+	if s.completionTokens == 0 {
+		s.contentChars += openAIContentChars(data)
+	}
+}
+
+func openAIContentChars(data map[string]interface{}) int {
+	choices, ok := data["choices"].([]interface{})
+	if !ok {
+		return 0
+	}
+	total := 0
+	for _, rawChoice := range choices {
+		choice, ok := rawChoice.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		delta, ok := choice["delta"].(map[string]interface{})
+		if !ok {
+			continue
+		}
+		content, _ := delta["content"].(string)
+		total += len(content)
+	}
+	return total
 }
 
 func (s *StreamUsageAccumulator) handleGeminiEvent(data map[string]interface{}) {
@@ -224,6 +302,10 @@ func (s *StreamUsageAccumulator) handleOllamaEvent(data map[string]interface{}) 
 
 // Finalize returns the accumulated usage result.
 func (s *StreamUsageAccumulator) Finalize() domain.UsageResult {
+	if s.completionTokens == 0 && s.contentChars > 0 {
+		s.completionTokens = (s.contentChars + 3) / 4
+		s.totalTokens = s.promptTokens + s.completionTokens
+	}
 	if s.totalTokens == 0 {
 		s.totalTokens = s.promptTokens + s.completionTokens
 	}
@@ -235,6 +317,7 @@ func (s *StreamUsageAccumulator) Finalize() domain.UsageResult {
 		TotalTokens:      s.totalTokens,
 		CacheReadTokens:  s.cacheReadTokens,
 		CacheWriteTokens: s.cacheWriteTokens,
+		Estimated:        s.contentChars > 0,
 	}
 }
 

@@ -4,10 +4,13 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -44,10 +47,33 @@ func newStartCmd() *cobra.Command {
 			}
 			defer database.Close()
 
-			srv := server.New(database, cfg, logger)
+			srv := server.NewWithConfigPath(database, cfg, logger, configPath)
 
-			addr := fmt.Sprintf("%s:%d", host, port)
-			httpSrv := &http.Server{Addr: addr, Handler: srv.Router}
+			bindHost := host
+			if bindHost == "" {
+				bindHost = cfg.Server.BindHost
+			}
+			if bindHost == "" {
+				bindHost = "127.0.0.1"
+			}
+			addr := net.JoinHostPort(bindHost, strconv.Itoa(port))
+			httpSrv := &http.Server{
+				Addr:              addr,
+				Handler:           srv.Router,
+				ReadHeaderTimeout: 10 * time.Second,
+				ReadTimeout:       60 * time.Second,
+				WriteTimeout:      0, // streaming proxy responses are open-ended
+				IdleTimeout:       120 * time.Second,
+			}
+
+			pidFile, err := daemonPIDFile()
+			if err == nil {
+				err = os.WriteFile(pidFile, []byte(fmt.Sprintf("%d %s\n", os.Getpid(), addr)), 0o600)
+			}
+			if err != nil {
+				logger.Warn("could not write pid file", "error", err)
+			}
+			defer os.Remove(pidFile)
 
 			ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 			defer stop()
@@ -67,11 +93,42 @@ func newStartCmd() *cobra.Command {
 			return httpSrv.Shutdown(shutdownCtx)
 		},
 	}
-	cmd.Flags().StringVar(&host, "host", "0.0.0.0", "bind host")
+	cmd.Flags().StringVar(&host, "host", "", "bind host (default: server.bind_host or 127.0.0.1)")
 	cmd.Flags().IntVar(&port, "port", 8080, "bind port")
 	cmd.Flags().StringVar(&configPath, "config", "config.json", "config file path")
 	cmd.Flags().StringVar(&dbPath, "db", "odotoken.db", "database file path")
 	return cmd
+}
+
+func daemonPIDFile() (string, error) {
+	stateDir := os.Getenv("XDG_RUNTIME_DIR")
+	if stateDir == "" {
+		stateDir = os.TempDir()
+	}
+	return filepath.Join(stateDir, "odotoken.pid"), nil
+}
+
+func readDaemonRecord() (pid int, addr string, path string, err error) {
+	path, err = daemonPIDFile()
+	if err != nil {
+		return 0, "", "", err
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return 0, "", path, err
+	}
+	fields := strings.Fields(string(data))
+	if len(fields) == 0 {
+		return 0, "", path, fmt.Errorf("pid file is empty")
+	}
+	pid, err = strconv.Atoi(fields[0])
+	if err != nil {
+		return 0, "", path, fmt.Errorf("invalid pid file: %w", err)
+	}
+	if len(fields) > 1 {
+		addr = fields[1]
+	}
+	return pid, addr, path, nil
 }
 
 func newStopCmd() *cobra.Command {
@@ -79,13 +136,10 @@ func newStopCmd() *cobra.Command {
 		Use:   "stop",
 		Short: "Stop the running background daemon",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			pidFile := filepath.Join(os.TempDir(), "odotoken.pid")
-			data, err := os.ReadFile(pidFile)
+			pid, _, pidFile, err := readDaemonRecord()
 			if err != nil {
 				return fmt.Errorf("no running daemon found: %w", err)
 			}
-			var pid int
-			fmt.Sscanf(string(data), "%d", &pid)
 			proc, err := os.FindProcess(pid)
 			if err != nil {
 				return fmt.Errorf("process %d not found: %w", pid, err)
@@ -93,7 +147,7 @@ func newStopCmd() *cobra.Command {
 			if err := proc.Signal(syscall.SIGTERM); err != nil {
 				return fmt.Errorf("failed to stop process: %w", err)
 			}
-			os.Remove(pidFile)
+			_ = os.Remove(pidFile)
 			fmt.Println("daemon stopped")
 			return nil
 		},
@@ -105,13 +159,23 @@ func newStatusCmd() *cobra.Command {
 		Use:   "status",
 		Short: "Check service status",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			resp, err := http.Get("http://localhost:8080/v1/health")
+			_, addr, _, err := readDaemonRecord()
+			if err != nil || addr == "" {
+				fmt.Println("status: not running")
+				return nil
+			}
+			client := &http.Client{Timeout: 3 * time.Second}
+			resp, err := client.Get("http://" + addr + "/v1/health")
 			if err != nil {
 				fmt.Println("status: not running")
 				return nil
 			}
 			defer resp.Body.Close()
-			fmt.Printf("status: running (HTTP %d)\n", resp.StatusCode)
+			if resp.StatusCode != http.StatusOK {
+				fmt.Printf("status: unhealthy (HTTP %d)\n", resp.StatusCode)
+				return nil
+			}
+			fmt.Printf("status: running (%s)\n", addr)
 			return nil
 		},
 	}
@@ -206,9 +270,26 @@ Examples:
 				out := make(chan domain.RawUsage, 100)
 				go imp.IterUsages(since, out)
 
+				// Batch in chunks: one transaction per commit amortizes fsync,
+				// but an unbounded batch would hold the WAL write lock for the
+				// entire import and stall the proxy.
+				const batchSize = 500
+				batch := make([]domain.TokenEvent, 0, batchSize)
 				count := 0
+				flush := func() {
+					if len(batch) == 0 {
+						return
+					}
+					if err := database.InsertEvents(batch); err != nil {
+						fmt.Printf("[error] %s: failed to insert batch: %v\n", imp.Name(), err)
+					} else {
+						count += len(batch)
+					}
+					batch = batch[:0]
+				}
+
 				for usage := range out {
-					event := domain.TokenEvent{
+					batch = append(batch, domain.TokenEvent{
 						Timestamp:        parseTimestamp(usage.Timestamp),
 						Provider:         usage.Provider,
 						Model:            usage.Model,
@@ -224,14 +305,12 @@ Examples:
 						SessionID:        usage.SessionID,
 						SessionFile:      usage.SessionFile,
 						EntryID:          usage.EntryID,
+					})
+					if len(batch) >= batchSize {
+						flush()
 					}
-					if _, err := database.InsertEvent(event); err != nil {
-						fmt.Printf("[error] %s: failed to insert event: %v\n", imp.Name(), err)
-						continue
-					}
-					count++
 				}
-				fmt.Printf("[done] %s: imported %d events\n", imp.Name(), count)
+				flush()
 				imported += count
 			}
 			fmt.Printf("\nTotal: %d events imported\n", imported)

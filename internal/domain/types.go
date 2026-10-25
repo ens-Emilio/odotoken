@@ -29,7 +29,8 @@ type TokenEvent struct {
 	EntryID          string    `json:"entry_id"`
 }
 
-// UsageResult holds parsed token usage from a response or stream.
+// UsageResult holds parsed token usage from a response or stream. Estimated
+// marks values inferred from response size when the provider omitted usage.
 type UsageResult struct {
 	Provider         string `json:"provider"`
 	Model            string `json:"model"`
@@ -38,6 +39,7 @@ type UsageResult struct {
 	TotalTokens      int    `json:"total_tokens"`
 	CacheReadTokens  int    `json:"cache_read_tokens"`
 	CacheWriteTokens int    `json:"cache_write_tokens"`
+	Estimated        bool   `json:"estimated,omitempty"`
 }
 
 // RawUsage represents a raw usage record from an importer.
@@ -59,22 +61,26 @@ type RawUsage struct {
 
 // ScanResult holds the result of scanning for importable sessions.
 type ScanResult struct {
-	CLI           string `json:"cli"`
-	Available     bool   `json:"available"`
-	SessionFiles  int    `json:"session_files"`
-	TotalEntries  int    `json:"total_entries"`
-	Path          string `json:"path"`
+	CLI          string `json:"cli"`
+	Available    bool   `json:"available"`
+	SessionFiles int    `json:"session_files"`
+	TotalEntries int    `json:"total_entries"`
+	Path         string `json:"path"`
 }
 
 // GuardCheckResult holds the result of a budget guard check.
 type GuardCheckResult struct {
-	Allowed            bool    `json:"allowed"`
-	Status             string  `json:"status"` // "ok", "warning", "breached"
-	Message            string  `json:"message"`
-	CurrentDailyCost   float64 `json:"current_daily_cost"`
-	DailyLimit         float64 `json:"daily_limit"`
-	CurrentMonthlyCost float64 `json:"current_monthly_cost"`
-	MonthlyLimit       float64 `json:"monthly_limit"`
-	CurrentDailyTokens int     `json:"current_daily_tokens"`
-	CurrentMonthTokens int     `json:"current_monthly_tokens"`
+	Allowed             bool    `json:"allowed"`
+	Status              string  `json:"status"` // "ok", "warning", "breached"
+	Message             string  `json:"message"`
+	CurrentDailyCost    float64 `json:"current_daily_cost"`
+	DailyLimit          float64 `json:"daily_limit"`
+	CurrentMonthlyCost  float64 `json:"current_monthly_cost"`
+	MonthlyLimit        float64 `json:"monthly_limit"`
+	CurrentDailyTokens  int     `json:"current_daily_tokens"`
+	CurrentMonthTokens  int     `json:"current_monthly_tokens"`
+	DailyTokensLimit    int     `json:"daily_tokens_limit"`
+	MonthlyTokensLimit  int     `json:"monthly_tokens_limit"`
+	WarningThresholdPct float64 `json:"warning_threshold_pct"`
+	ActionOnBreach      string  `json:"action_on_breach"`
 }

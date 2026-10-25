@@ -3,7 +3,6 @@ package db
 import (
 	"database/sql"
 	"fmt"
-	"strings"
 	"time"
 
 	_ "modernc.org/sqlite"
@@ -42,6 +41,37 @@ CREATE INDEX IF NOT EXISTS idx_events_timestamp ON token_events(timestamp);
 CREATE INDEX IF NOT EXISTS idx_events_project ON token_events(project_id);
 CREATE INDEX IF NOT EXISTS idx_events_model ON token_events(model);
 CREATE INDEX IF NOT EXISTS idx_events_provider ON token_events(provider);
+CREATE INDEX IF NOT EXISTS idx_events_ts_project_source ON token_events(timestamp, project_id, source);
+CREATE INDEX IF NOT EXISTS idx_events_ts_source_project ON token_events(timestamp, source, project_id);
+
+CREATE TABLE IF NOT EXISTS guard_events (
+	id INTEGER PRIMARY KEY AUTOINCREMENT,
+	timestamp TEXT NOT NULL,
+	status TEXT NOT NULL,
+	message TEXT NOT NULL,
+	action TEXT NOT NULL,
+	daily_cost_usd REAL NOT NULL DEFAULT 0,
+	monthly_cost_usd REAL NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_guard_events_timestamp ON guard_events(timestamp);
+
+CREATE TABLE IF NOT EXISTS active_runs (
+	run_id TEXT PRIMARY KEY,
+	session_id TEXT NOT NULL DEFAULT '',
+	client_app TEXT NOT NULL,
+	provider TEXT NOT NULL,
+	model TEXT NOT NULL,
+	project_id TEXT NOT NULL DEFAULT 'default',
+	started_at TEXT NOT NULL,
+	last_activity TEXT NOT NULL,
+	finished_at TEXT,
+	status TEXT NOT NULL DEFAULT 'running',
+	error TEXT NOT NULL DEFAULT '',
+	prompt_tokens INTEGER NOT NULL DEFAULT 0,
+	completion_tokens INTEGER NOT NULL DEFAULT 0,
+	cost_usd REAL NOT NULL DEFAULT 0.0
+);
+CREATE INDEX IF NOT EXISTS idx_active_runs_open ON active_runs(status, last_activity);
 `
 
 // Database wraps SQLite operations.
@@ -144,87 +174,277 @@ func (d *Database) InsertEvents(events []domain.TokenEvent) error {
 	return tx.Commit()
 }
 
+// GuardEvent records a budget state transition for the dashboard.
+type GuardEvent struct {
+	ID             int64   `json:"id"`
+	Timestamp      string  `json:"timestamp"`
+	Status         string  `json:"status"`
+	Message        string  `json:"message"`
+	Action         string  `json:"action"`
+	DailyCostUSD   float64 `json:"daily_cost_usd"`
+	MonthlyCostUSD float64 `json:"monthly_cost_usd"`
+}
+
+// InsertGuardEvent persists a state transition, not every budget poll.
+func (d *Database) InsertGuardEvent(e GuardEvent) error {
+	_, err := d.db.Exec(`INSERT INTO guard_events
+		(timestamp, status, message, action, daily_cost_usd, monthly_cost_usd)
+		VALUES (?, ?, ?, ?, ?, ?)`,
+		e.Timestamp, e.Status, e.Message, e.Action, e.DailyCostUSD, e.MonthlyCostUSD)
+	return err
+}
+
+// RecentGuardEvents returns the latest budget transitions.
+func (d *Database) RecentGuardEvents(limit int) ([]GuardEvent, error) {
+	if limit <= 0 {
+		limit = 20
+	}
+	rows, err := d.db.Query(`SELECT id, timestamp, status, message, action,
+		daily_cost_usd, monthly_cost_usd FROM guard_events
+		ORDER BY id DESC LIMIT ?`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var result []GuardEvent
+	for rows.Next() {
+		var e GuardEvent
+		if err := rows.Scan(&e.ID, &e.Timestamp, &e.Status, &e.Message,
+			&e.Action, &e.DailyCostUSD, &e.MonthlyCostUSD); err != nil {
+			return nil, err
+		}
+		result = append(result, e)
+	}
+	return result, rows.Err()
+}
+
 // DailyStats holds aggregated stats for a single day.
 type DailyStats struct {
-	Date            string  `json:"date"`
-	TotalRequests   int     `json:"total_requests"`
-	TotalTokens     int     `json:"total_tokens"`
-	PromptTokens    int     `json:"prompt_tokens"`
+	Date             string  `json:"date"`
+	TotalRequests    int     `json:"total_requests"`
+	TotalTokens      int     `json:"total_tokens"`
+	PromptTokens     int     `json:"prompt_tokens"`
 	CompletionTokens int     `json:"completion_tokens"`
-	CacheReadTokens int     `json:"cache_read_tokens"`
-	TotalCostUSD    float64 `json:"total_cost_usd"`
-	ShadowCost      float64 `json:"shadow_cost"`
-	AvgLatencyMs    float64 `json:"avg_latency_ms"`
+	CacheReadTokens  int     `json:"cache_read_tokens"`
+	TotalCostUSD     float64 `json:"total_cost_usd"`
+	ShadowCost       float64 `json:"shadow_cost"`
+	AvgLatencyMs     float64 `json:"avg_latency_ms"`
 }
 
 // GetDailyStats returns per-day aggregated stats within a date range.
-func (d *Database) GetDailyStats(from, to time.Time, projectID string) ([]DailyStats, error) {
-	q := `SELECT
-		date(timestamp) as date,
-		COUNT(*) as total_requests,
-		SUM(total_tokens) as total_tokens,
-		SUM(prompt_tokens) as prompt_tokens,
-		SUM(completion_tokens) as completion_tokens,
-		SUM(cache_read_tokens) as cache_read_tokens,
-		SUM(cost_usd) as total_cost_usd,
-		SUM(shadow_cost) as shadow_cost,
-		AVG(latency_ms) as avg_latency_ms
-	FROM token_events
-	WHERE timestamp >= ? AND timestamp < ?`
+func (d *Database) GetDailyStats(from, to time.Time, projectID string, tz ...string) ([]DailyStats, error) {
+	// Group by local day in Go, not in SQL: a fixed offset applied to the whole
+	// range mislabels dates that cross a daylight-saving transition inside it.
+	loc := time.UTC
+	if len(tz) > 0 && tz[0] != "" && tz[0] != "UTC" {
+		if l, err := time.LoadLocation(tz[0]); err == nil {
+			loc = l
+		}
+	}
+	q := `SELECT timestamp, total_tokens, prompt_tokens, completion_tokens, cache_read_tokens, cost_usd, shadow_cost, latency_ms
+	FROM token_events WHERE timestamp >= ? AND timestamp < ?`
 	args := []interface{}{from.UTC().Format(time.RFC3339), to.UTC().Format(time.RFC3339)}
-
 	if projectID != "" {
 		q += " AND project_id = ?"
 		args = append(args, projectID)
 	}
-	q += " GROUP BY date(timestamp) ORDER BY date DESC"
-
+	q += " ORDER BY timestamp ASC"
 	rows, err := d.db.Query(q, args...)
 	if err != nil {
 		return nil, fmt.Errorf("daily stats: %w", err)
 	}
 	defer rows.Close()
 
-	var stats []DailyStats
+	type acc struct {
+		TotalRequests    int
+		TotalTokens      int
+		PromptTokens     int
+		CompletionTokens int
+		CacheReadTokens  int
+		TotalCostUSD     float64
+		ShadowCost       float64
+		latencySum       float64
+	}
+	byDay := map[string]*acc{}
+	var order []string
 	for rows.Next() {
-		var s DailyStats
-		if err := rows.Scan(&s.Date, &s.TotalRequests, &s.TotalTokens,
-			&s.PromptTokens, &s.CompletionTokens, &s.CacheReadTokens,
-			&s.TotalCostUSD, &s.ShadowCost, &s.AvgLatencyMs); err != nil {
+		var ts string
+		var tokens, prompt, completion, cacheRead int
+		var cost, shadow, latency float64
+		if err := rows.Scan(&ts, &tokens, &prompt, &completion, &cacheRead, &cost, &shadow, &latency); err != nil {
 			return nil, fmt.Errorf("scan daily stats: %w", err)
 		}
-		stats = append(stats, s)
+		t, err := time.Parse(time.RFC3339Nano, ts)
+		if err != nil {
+			continue
+		}
+		day := t.In(loc).Format("2006-01-02")
+		a := byDay[day]
+		if a == nil {
+			a = &acc{}
+			byDay[day] = a
+			order = append(order, day)
+		}
+		a.TotalRequests++
+		a.TotalTokens += tokens
+		a.PromptTokens += prompt
+		a.CompletionTokens += completion
+		a.CacheReadTokens += cacheRead
+		a.TotalCostUSD += cost
+		a.ShadowCost += shadow
+		a.latencySum += latency
 	}
-	return stats, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	stats := make([]DailyStats, 0, len(order))
+	for i := len(order) - 1; i >= 0; i-- {
+		day := order[i]
+		a := byDay[day]
+		avg := 0.0
+		if a.TotalRequests > 0 {
+			avg = a.latencySum / float64(a.TotalRequests)
+		}
+		stats = append(stats, DailyStats{
+			Date: day, TotalRequests: a.TotalRequests, TotalTokens: a.TotalTokens,
+			PromptTokens: a.PromptTokens, CompletionTokens: a.CompletionTokens,
+			CacheReadTokens: a.CacheReadTokens, TotalCostUSD: a.TotalCostUSD,
+			ShadowCost: a.ShadowCost, AvgLatencyMs: avg,
+		})
+	}
+	return stats, nil
+}
+
+// localDailyUsage scans the day boundaries in the caller's zone and buckets
+// each event with time.Time.In, so a spring/fall DST change moves an event to
+// the correct local date instead of using one offset for the whole window.
+func (d *Database) localDailyUsage(days int, since, source string, tz ...string) ([]DailyUsage, error) {
+	loc := time.UTC
+	if len(tz) > 0 && tz[0] != "" && tz[0] != "UTC" {
+		if l, err := time.LoadLocation(tz[0]); err == nil {
+			loc = l
+		}
+	}
+	// Build the list of local days first so days with zero events still show up
+	// in order when the chart needs a continuous axis.
+	now := time.Now().In(loc)
+	startDay := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, loc).AddDate(0, 0, -days+1)
+	if since != "" {
+		if t, err := time.Parse(time.RFC3339Nano, since); err == nil {
+			t = t.In(loc)
+			startDay = time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, loc)
+		}
+	}
+	endDay := now
+	// A caller may ask about a window entirely in the past. Keep the query
+	// useful there instead of forcing the range to run until today.
+	if since != "" {
+		if t, err := time.Parse(time.RFC3339Nano, since); err == nil {
+			t = t.In(loc)
+			if days > 0 {
+				endDay = t.AddDate(0, 0, days-1)
+			}
+		}
+	}
+	windowStart := startDay.AddDate(0, 0, -1).UTC()
+	windowEnd := endDay.AddDate(0, 0, 2).UTC()
+	q := `SELECT timestamp, total_tokens, cost_usd FROM token_events WHERE timestamp >= ? AND timestamp < ?`
+	args := []interface{}{windowStart.Format(time.RFC3339), windowEnd.Format(time.RFC3339)}
+	if source != "" && source != "all" {
+		q += " AND source = ?"
+		args = append(args, source)
+	}
+	q += " ORDER BY timestamp ASC"
+	rows, err := d.db.Query(q, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	type acc struct {
+		TotalRequests int
+		TotalTokens   int
+		CostUSD       float64
+	}
+	byDay := map[string]*acc{}
+	for rows.Next() {
+		var ts string
+		var tokens int
+		var cost float64
+		if err := rows.Scan(&ts, &tokens, &cost); err != nil {
+			return nil, err
+		}
+		t, err := time.Parse(time.RFC3339Nano, ts)
+		if err != nil {
+			continue
+		}
+		day := t.In(loc).Format("2006-01-02")
+		a := byDay[day]
+		if a == nil {
+			a = &acc{}
+			byDay[day] = a
+		}
+		a.TotalRequests++
+		a.TotalTokens += tokens
+		a.CostUSD += cost
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	result := make([]DailyUsage, 0, days)
+	for day := startDay; !day.After(endDay); day = day.AddDate(0, 0, 1) {
+		key := day.Format("2006-01-02")
+		a := byDay[key]
+		if a == nil {
+			result = append(result, DailyUsage{Date: key})
+			continue
+		}
+		result = append(result, DailyUsage{Date: key, TotalRequests: a.TotalRequests, TotalTokens: a.TotalTokens, CostUSD: a.CostUSD})
+	}
+	return result, nil
+}
+
+// GetDailyUsage returns per-day usage for the last N days.
+func (d *Database) GetDailyUsage(days int, since, source string, tz ...string) ([]DailyUsage, error) {
+	if days <= 0 {
+		days = 30
+	}
+	return d.localDailyUsage(days, since, source, tz...)
 }
 
 // CostSummary holds aggregate cost data for budget checks.
 type CostSummary struct {
-	DailyCostUSD    float64 `json:"daily_cost_usd"`
-	MonthlyCostUSD  float64 `json:"monthly_cost_usd"`
-	DailyTokens     int     `json:"daily_tokens"`
-	MonthlyTokens   int     `json:"monthly_tokens"`
+	DailyCostUSD   float64 `json:"daily_cost_usd"`
+	MonthlyCostUSD float64 `json:"monthly_cost_usd"`
+	DailyTokens    int     `json:"daily_tokens"`
+	MonthlyTokens  int     `json:"monthly_tokens"`
 }
 
-// GetCostSummary returns current day and month cost/token totals for a project.
+// GetCostSummary returns current day and month totals in UTC.
 func (d *Database) GetCostSummary(projectID string) (CostSummary, error) {
-	now := time.Now().UTC()
-	dayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
-	monthStart := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.UTC)
+	return d.GetCostSummaryInLocation(projectID, time.UTC)
+}
 
+// GetCostSummaryInLocation calculates the budget window in loc, so a dashboard
+// configured for a local timezone and the guard agree on when a day begins.
+func (d *Database) GetCostSummaryInLocation(projectID string, loc *time.Location) (CostSummary, error) {
+	if loc == nil {
+		loc = time.UTC
+	}
+	now := time.Now().In(loc)
+	dayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, loc)
+	monthStart := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, loc)
 	q := `SELECT
 		COALESCE(SUM(CASE WHEN timestamp >= ? THEN cost_usd ELSE 0 END), 0),
 		COALESCE(SUM(CASE WHEN timestamp >= ? THEN cost_usd ELSE 0 END), 0),
 		COALESCE(SUM(CASE WHEN timestamp >= ? THEN total_tokens ELSE 0 END), 0),
 		COALESCE(SUM(CASE WHEN timestamp >= ? THEN total_tokens ELSE 0 END), 0)
 	FROM token_events WHERE project_id = ?`
-
 	var s CostSummary
 	err := d.db.QueryRow(q,
-		dayStart.Format(time.RFC3339),
-		monthStart.Format(time.RFC3339),
-		dayStart.Format(time.RFC3339),
-		monthStart.Format(time.RFC3339),
+		dayStart.UTC().Format(time.RFC3339),
+		monthStart.UTC().Format(time.RFC3339),
+		dayStart.UTC().Format(time.RFC3339),
+		monthStart.UTC().Format(time.RFC3339),
 		projectID,
 	).Scan(&s.DailyCostUSD, &s.MonthlyCostUSD, &s.DailyTokens, &s.MonthlyTokens)
 	if err != nil {
@@ -279,13 +499,13 @@ func (d *Database) RecentEvents(limit int, projectID string) ([]domain.TokenEven
 
 // ModelStats holds per-model aggregated usage.
 type ModelStats struct {
-	Model           string  `json:"model"`
-	Provider        string  `json:"provider"`
-	TotalRequests   int     `json:"total_requests"`
-	TotalTokens     int     `json:"total_tokens"`
-	PromptTokens    int     `json:"prompt_tokens"`
+	Model            string  `json:"model"`
+	Provider         string  `json:"provider"`
+	TotalRequests    int     `json:"total_requests"`
+	TotalTokens      int     `json:"total_tokens"`
+	PromptTokens     int     `json:"prompt_tokens"`
 	CompletionTokens int     `json:"completion_tokens"`
-	TotalCostUSD    float64 `json:"total_cost_usd"`
+	TotalCostUSD     float64 `json:"total_cost_usd"`
 }
 
 // GetModelStats returns per-model aggregated stats.
@@ -350,22 +570,25 @@ func (d *Database) AllEventsForReplay() ([]domain.TokenEvent, error) {
 
 // Summary holds aggregate stats for the dashboard.
 type Summary struct {
-	TotalRequests     int     `json:"total_requests"`
-	TotalTokens       int     `json:"total_tokens"`
-	PromptTokens      int     `json:"prompt_tokens"`
-	CompletionTokens  int     `json:"completion_tokens"`
-	CacheReadTokens   int     `json:"cache_read_tokens"`
-	TotalCostUSD      float64 `json:"total_cost_usd"`
-	TotalShadowCost   float64 `json:"total_shadow_cost_usd"`
-	AvgLatencyMs      float64 `json:"avg_latency_ms"`
+	TotalRequests    int     `json:"total_requests"`
+	TotalTokens      int     `json:"total_tokens"`
+	PromptTokens     int     `json:"prompt_tokens"`
+	CompletionTokens int     `json:"completion_tokens"`
+	CacheReadTokens  int     `json:"cache_read_tokens"`
+	CacheWriteTokens int     `json:"cache_write_tokens"`
+	TotalCostUSD     float64 `json:"total_cost_usd"`
+	TotalShadowCost  float64 `json:"total_shadow_cost_usd"`
+	AvgLatencyMs     float64 `json:"avg_latency_ms"`
+	AvgTTFBMs        float64 `json:"avg_ttfb_ms"`
 }
 
 // GetSummary returns aggregate stats with optional filters.
 func (d *Database) GetSummary(since, project, source, tag string) (Summary, error) {
 	q := `SELECT COALESCE(COUNT(*),0), COALESCE(SUM(total_tokens),0),
 		COALESCE(SUM(prompt_tokens),0), COALESCE(SUM(completion_tokens),0),
-		COALESCE(SUM(cache_read_tokens),0), COALESCE(SUM(cost_usd),0),
-		COALESCE(SUM(shadow_cost),0), COALESCE(AVG(latency_ms),0)
+		COALESCE(SUM(cache_read_tokens),0), COALESCE(SUM(cache_write_tokens),0),
+		COALESCE(SUM(cost_usd),0), COALESCE(SUM(shadow_cost),0),
+		COALESCE(AVG(latency_ms),0), COALESCE(AVG(ttfb_ms),0)
 		FROM token_events WHERE 1=1`
 	args := []interface{}{}
 	if since != "" {
@@ -386,26 +609,32 @@ func (d *Database) GetSummary(since, project, source, tag string) (Summary, erro
 	}
 	var s Summary
 	err := d.db.QueryRow(q, args...).Scan(&s.TotalRequests, &s.TotalTokens,
-		&s.PromptTokens, &s.CompletionTokens, &s.CacheReadTokens,
-		&s.TotalCostUSD, &s.TotalShadowCost, &s.AvgLatencyMs)
+		&s.PromptTokens, &s.CompletionTokens, &s.CacheReadTokens, &s.CacheWriteTokens,
+		&s.TotalCostUSD, &s.TotalShadowCost, &s.AvgLatencyMs, &s.AvgTTFBMs)
 	return s, err
 }
 
 // ByModel holds per-model aggregated stats.
 type ByModel struct {
-	Model           string  `json:"model"`
-	Provider        string  `json:"provider"`
-	TotalRequests   int     `json:"requests"`
-	TotalTokens     int     `json:"total_tokens"`
-	PromptTokens    int     `json:"prompt_tokens"`
-	CompletionToks  int     `json:"completion_tokens"`
-	TotalCostUSD    float64 `json:"total_cost_usd"`
+	Model          string  `json:"model"`
+	Provider       string  `json:"provider"`
+	TotalRequests  int     `json:"requests"`
+	TotalTokens    int     `json:"total_tokens"`
+	PromptTokens   int     `json:"prompt_tokens"`
+	CompletionToks int     `json:"completion_tokens"`
+	CacheReadToks  int     `json:"cache_read_tokens"`
+	CacheWriteToks int     `json:"cache_write_tokens"`
+	TotalCostUSD   float64 `json:"total_cost_usd"`
+	PriceMissing   int     `json:"price_missing_count"`
 }
 
 // GetSummaryByModel returns per-model aggregated stats.
 func (d *Database) GetSummaryByModel(since, project, source string) ([]ByModel, error) {
 	q := `SELECT model, provider, COALESCE(COUNT(*),0), COALESCE(SUM(total_tokens),0),
-		COALESCE(SUM(prompt_tokens),0), COALESCE(SUM(completion_tokens),0), COALESCE(SUM(cost_usd),0)
+		COALESCE(SUM(prompt_tokens),0), COALESCE(SUM(completion_tokens),0),
+		COALESCE(SUM(cache_read_tokens),0), COALESCE(SUM(cache_write_tokens),0),
+		COALESCE(SUM(cost_usd),0),
+		COALESCE(SUM(CASE WHEN metadata LIKE '%"price_missing":true%' THEN 1 ELSE 0 END),0)
 		FROM token_events WHERE 1=1`
 	args := []interface{}{}
 	if since != "" {
@@ -430,7 +659,8 @@ func (d *Database) GetSummaryByModel(since, project, source string) ([]ByModel, 
 	for rows.Next() {
 		var m ByModel
 		if err := rows.Scan(&m.Model, &m.Provider, &m.TotalRequests,
-			&m.TotalTokens, &m.PromptTokens, &m.CompletionToks, &m.TotalCostUSD); err != nil {
+			&m.TotalTokens, &m.PromptTokens, &m.CompletionToks,
+			&m.CacheReadToks, &m.CacheWriteToks, &m.TotalCostUSD, &m.PriceMissing); err != nil {
 			return nil, err
 		}
 		result = append(result, m)
@@ -486,11 +716,13 @@ type ByProject struct {
 	TotalRequests int     `json:"requests"`
 	TotalTokens   int     `json:"total_tokens"`
 	TotalCostUSD  float64 `json:"total_cost_usd"`
+	ShadowCost    float64 `json:"shadow_cost_usd"`
 }
 
 // GetSummaryByProject returns per-project aggregated stats.
 func (d *Database) GetSummaryByProject(since, source string) ([]ByProject, error) {
-	q := `SELECT project_id, COALESCE(COUNT(*),0), COALESCE(SUM(total_tokens),0), COALESCE(SUM(cost_usd),0)
+	q := `SELECT project_id, COALESCE(COUNT(*),0), COALESCE(SUM(total_tokens),0),
+		COALESCE(SUM(cost_usd),0), COALESCE(SUM(shadow_cost),0)
 		FROM token_events WHERE 1=1`
 	args := []interface{}{}
 	if since != "" {
@@ -510,7 +742,7 @@ func (d *Database) GetSummaryByProject(since, source string) ([]ByProject, error
 	var result []ByProject
 	for rows.Next() {
 		var p ByProject
-		if err := rows.Scan(&p.ProjectID, &p.TotalRequests, &p.TotalTokens, &p.TotalCostUSD); err != nil {
+		if err := rows.Scan(&p.ProjectID, &p.TotalRequests, &p.TotalTokens, &p.TotalCostUSD, &p.ShadowCost); err != nil {
 			return nil, err
 		}
 		result = append(result, p)
@@ -606,90 +838,174 @@ type DailyUsage struct {
 	CostUSD       float64 `json:"cost_usd"`
 }
 
-// GetDailyUsage returns per-day usage for the last N days.
-func (d *Database) GetDailyUsage(days int, since, source string) ([]DailyUsage, error) {
-	q := `SELECT substr(timestamp,1,10) as day, COUNT(*), SUM(total_tokens), SUM(cost_usd)
-		FROM token_events WHERE 1=1`
-	args := []interface{}{}
-	if since != "" {
-		q += " AND timestamp >= ?"
-		args = append(args, since)
-	} else {
-		cutoff := time.Now().UTC().AddDate(0, 0, -days).Format(time.RFC3339)
-		q += " AND timestamp >= ?"
-		args = append(args, cutoff)
+// LiveSession represents a model request currently in flight.
+type LiveSession struct {
+	RunID        string  `json:"run_id"`
+	CLI          string  `json:"cli"`
+	SessionID    string  `json:"session_id"`
+	Provider     string  `json:"provider"`
+	Model        string  `json:"model"`
+	TokensInput  int     `json:"tokens_input"`
+	TokensOutput int     `json:"tokens_output"`
+	CostUSD      float64 `json:"cost_usd"`
+	Project      string  `json:"project"`
+	StartedAt    string  `json:"started_at"`
+	LastUpdated  string  `json:"last_updated"`
+	ElapsedMs    int64   `json:"elapsed_ms"`
+}
+
+// StartActiveRun records a request before its upstream response is received.
+func (d *Database) StartActiveRun(runID, sessionID, clientApp, provider, model, projectID string) error {
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	if sessionID == "" {
+		sessionID = runID
 	}
-	if source != "" && source != "all" {
-		q += " AND source = ?"
-		args = append(args, source)
+	_, err := d.db.Exec(`INSERT INTO active_runs
+		(run_id, session_id, client_app, provider, model, project_id, started_at, last_activity, status)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'running')
+		ON CONFLICT(run_id) DO UPDATE SET
+			session_id=excluded.session_id, client_app=excluded.client_app,
+			provider=excluded.provider, model=excluded.model,
+			project_id=excluded.project_id, last_activity=excluded.last_activity,
+			finished_at=NULL, status='running', error=''`,
+		runID, sessionID, clientApp, provider, model, projectID, now, now)
+	return err
+}
+
+// TouchActiveRun keeps a long-running stream visible.
+func (d *Database) TouchActiveRun(runID string) error {
+	_, err := d.db.Exec(`UPDATE active_runs SET last_activity=? WHERE run_id=? AND status='running'`,
+		time.Now().UTC().Format(time.RFC3339Nano), runID)
+	return err
+}
+
+// FinishActiveRun closes a run. Repeated completion paths are idempotent.
+func (d *Database) FinishActiveRun(runID, status, errMessage string, promptTokens, completionTokens int, costUSD float64) error {
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	_, err := d.db.Exec(`UPDATE active_runs SET finished_at=?, last_activity=?,
+		status=?, error=?, prompt_tokens=?, completion_tokens=?, cost_usd=?
+		WHERE run_id=? AND finished_at IS NULL`,
+		now, now, status, errMessage, promptTokens, completionTokens, costUSD, runID)
+	return err
+}
+
+// ExpireOrphanRuns closes runs whose process vanished and applies a 7-day
+// retention window to completed rows. The 10 minute ceiling prevents a stale
+// row surviving a crash while a response is still streaming.
+func (d *Database) ExpireOrphanRuns(maxIdle time.Duration) error {
+	cutoff := time.Now().UTC().Add(-maxIdle).Format(time.RFC3339Nano)
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	result, err := d.db.Exec(`UPDATE active_runs SET finished_at=?, last_activity=?,
+		status='expired', error='no activity before timeout'
+		WHERE finished_at IS NULL AND status='running' AND last_activity < ?`,
+		now, now, cutoff)
+	if err != nil {
+		return err
 	}
-	q += " GROUP BY day ORDER BY day ASC"
-	rows, err := d.db.Query(q, args...)
+	_ = result
+	retentionCutoff := time.Now().UTC().Add(-7 * 24 * time.Hour).Format(time.RFC3339Nano)
+	_, err = d.db.Exec(`DELETE FROM active_runs WHERE finished_at IS NOT NULL AND finished_at < ?`, retentionCutoff)
+	return err
+}
+
+// GetLiveSessions returns actual in-flight runs, not completed event rows.
+func (d *Database) GetLiveSessions() ([]LiveSession, error) {
+	if err := d.ExpireOrphanRuns(10 * time.Minute); err != nil {
+		return nil, err
+	}
+	rows, err := d.db.Query(`SELECT run_id, session_id, client_app, provider, model,
+		project_id, started_at, last_activity, prompt_tokens, completion_tokens, cost_usd
+		FROM active_runs WHERE finished_at IS NULL AND status='running'
+		ORDER BY started_at DESC LIMIT 50`)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var result []DailyUsage
+	now := time.Now().UTC()
+	var result []LiveSession
 	for rows.Next() {
-		var du DailyUsage
-		if err := rows.Scan(&du.Date, &du.TotalRequests, &du.TotalTokens, &du.CostUSD); err != nil {
+		var ls LiveSession
+		var started string
+		if err := rows.Scan(&ls.RunID, &ls.SessionID, &ls.CLI, &ls.Provider, &ls.Model,
+			&ls.Project, &started, &ls.LastUpdated, &ls.TokensInput,
+			&ls.TokensOutput, &ls.CostUSD); err != nil {
 			return nil, err
 		}
-		result = append(result, du)
+		if ls.SessionID == "" {
+			ls.SessionID = ls.RunID
+		}
+		ls.StartedAt = started
+		if t, err := time.Parse(time.RFC3339Nano, started); err == nil {
+			ls.ElapsedMs = now.Sub(t).Milliseconds()
+		}
+		result = append(result, ls)
 	}
 	return result, rows.Err()
 }
 
-// TpsSummary holds throughput summary.
+// TpsSummary holds measured output throughput. Total tokens are reported
+// separately because prompt and cache tokens are not streamed back.
 type TpsSummary struct {
-	AvgTPS    float64 `json:"avg_tps"`
-	PeakTPS   float64 `json:"peak_tps"`
-	TotalReqs int     `json:"total_requests"`
+	AvgTPS           float64 `json:"avg_tps"`
+	PeakTPS          float64 `json:"peak_tps"`
+	TotalReqs        int     `json:"total_requests"`
+	TotalTokens      int     `json:"total_tokens"`
+	CompletionTokens int     `json:"completion_tokens"`
+	AvgLatencyMs     float64 `json:"avg_latency_ms"`
 }
+
+// maxPlausibleTPS caps a single response's implied output rate. A row above it
+// has a broken streaming_ms and must not reach the dashboard.
+const maxPlausibleTPS = 1000.0
+
+// genSecsExpr is the wall time the model spent producing output, in ms.
+// streaming_ms wins when plausible; otherwise latency_ms is floored at the time
+// the completion itself requires at maxPlausibleTPS.
+var genSecsExpr = `(CASE
+	WHEN streaming_ms >= 50
+		AND completion_tokens * 1000.0 / streaming_ms <= ` + fmt.Sprintf("%f", maxPlausibleTPS) + `
+	THEN streaming_ms
+	ELSE MAX(latency_ms, completion_tokens * 1000.0 / ` + fmt.Sprintf("%f", maxPlausibleTPS) + `)
+	END)`
 
 // GetTpsSummary returns throughput summary.
 func (d *Database) GetTpsSummary(since, project, source string) (TpsSummary, error) {
-	q := `SELECT COUNT(*), COALESCE(MAX(total_tokens/NULLIF(latency_ms/1000.0,0)),0)
-		FROM token_events WHERE latency_ms > 0 AND 1=1`
+	var s TpsSummary
+	where := ` WHERE (streaming_ms > 0 OR latency_ms > 0)`
 	args := []interface{}{}
 	if since != "" {
-		q += " AND timestamp >= ?"
+		where += " AND timestamp >= ?"
 		args = append(args, since)
 	}
 	if project != "" && project != "all" {
-		q += " AND project_id = ?"
+		where += " AND project_id = ?"
 		args = append(args, project)
 	}
 	if source != "" && source != "all" {
-		q += " AND source = ?"
+		where += " AND source = ?"
 		args = append(args, source)
 	}
-	var s TpsSummary
-	err := d.db.QueryRow(q, args...).Scan(&s.TotalReqs, &s.PeakTPS)
-	if err != nil {
+	q := `SELECT COUNT(*), COALESCE(SUM(completion_tokens),0),
+		COALESCE(SUM(total_tokens),0), COALESCE(AVG(latency_ms),0),
+		COALESCE(SUM(` + genSecsExpr + `),0)/1000.0
+		FROM token_events` + where
+	var genSecs float64
+	if err := d.db.QueryRow(q, args...).
+		Scan(&s.TotalReqs, &s.CompletionTokens, &s.TotalTokens, &s.AvgLatencyMs, &genSecs); err != nil {
 		return s, err
 	}
-	// avg_tps: total tokens / total time window in seconds
-	q2 := `SELECT COALESCE(SUM(total_tokens),0),
-		COALESCE((strftime('%s','now') - MIN(strftime('%s',timestamp))),1)
-		FROM token_events WHERE 1=1`
-	args2 := []interface{}{}
-	if since != "" {
-		q2 += " AND timestamp >= ?"
-		args2 = append(args2, since)
+	if genSecs > 0 {
+		s.AvgTPS = float64(s.CompletionTokens) / genSecs
 	}
-	if project != "" && project != "all" {
-		q2 += " AND project_id = ?"
-		args2 = append(args2, project)
-	}
-	if source != "" && source != "all" {
-		q2 += " AND source = ?"
-		args2 = append(args2, source)
-	}
-	var totalTok int
-	var windowSecs float64
-	if err := d.db.QueryRow(q2, args2...).Scan(&totalTok, &windowSecs); err == nil && windowSecs > 0 {
-		s.AvgTPS = float64(totalTok) / windowSecs
+	peakQ := `SELECT COALESCE(MAX(b), 0) FROM (
+		SELECT SUM(completion_tokens) /
+			MAX(SUM(` + genSecsExpr + `) / 1000.0,
+				CAST(strftime('%s', MAX(timestamp)) AS INTEGER) - CAST(strftime('%s', MIN(timestamp)) AS INTEGER),
+				10.0) AS b
+		FROM token_events` + where + `
+		GROUP BY CAST(strftime('%s', timestamp) AS INTEGER)/10)`
+	if err := d.db.QueryRow(peakQ, args...).Scan(&s.PeakTPS); err != nil {
+		s.PeakTPS = 0
 	}
 	return s, nil
 }
@@ -698,27 +1014,30 @@ func (d *Database) GetTpsSummary(since, project, source string) (TpsSummary, err
 type TpsSeriesPoint struct {
 	Timestamp string  `json:"timestamp"`
 	AvgTPS    float64 `json:"avg_tps"`
+	PeakTPS   float64 `json:"peak_tps"`
 	Requests  int     `json:"requests"`
 	Tokens    int     `json:"tokens"`
 }
 
-// GetTpsSeries returns time-series throughput data.
+// GetTpsSeries returns throughput per wall-clock bucket.
 func (d *Database) GetTpsSeries(since, interval, project, source string) ([]TpsSeriesPoint, error) {
 	groupExpr := "strftime('%Y-%m-%dT%H:00:00Z', timestamp)"
-	if interval == "1d" {
+	switch interval {
+	case "1d":
 		groupExpr = "substr(timestamp,1,10)"
-	} else if interval == "5m" {
+	case "1m":
+		groupExpr = "strftime('%Y-%m-%dT%H:%M:00Z', timestamp)"
+	case "5m":
 		groupExpr = "strftime('%Y-%m-%dT%H:', timestamp) || printf('%02d', (CAST(strftime('%M', timestamp) AS INTEGER)/5)*5) || ':00Z'"
 	}
-	q := fmt.Sprintf(`SELECT %s as ts, COUNT(*), SUM(total_tokens),
-		COALESCE(SUM(total_tokens)/NULLIF(COUNT(*)*3600.0/NULLIF(CAST(? AS REAL),0),0),0)
-		FROM token_events WHERE 1=1`, groupExpr)
-	args := []interface{}{float64(3600)} // default 1h bucket seconds
-	if interval == "5m" {
-		args[0] = float64(300)
-	} else if interval == "1d" {
-		args[0] = float64(86400)
-	}
+	peakExpr := `MAX(CASE
+		WHEN streaming_ms >= 50 AND completion_tokens * 1000.0 / streaming_ms <= ` + fmt.Sprintf("%f", maxPlausibleTPS) + `
+		THEN completion_tokens * 1000.0 / streaming_ms ELSE 0 END)`
+	q := fmt.Sprintf(`SELECT %s as ts, COUNT(*), COALESCE(SUM(completion_tokens),0),
+		COALESCE(SUM(completion_tokens)*1000.0/NULLIF(SUM(`+genSecsExpr+`),0),0),
+		COALESCE(`+peakExpr+`,0)
+		FROM token_events WHERE (streaming_ms > 0 OR latency_ms > 0)`, groupExpr)
+	args := []interface{}{}
 	if since != "" {
 		q += " AND timestamp >= ?"
 		args = append(args, since)
@@ -740,7 +1059,7 @@ func (d *Database) GetTpsSeries(since, interval, project, source string) ([]TpsS
 	var result []TpsSeriesPoint
 	for rows.Next() {
 		var p TpsSeriesPoint
-		if err := rows.Scan(&p.Timestamp, &p.Requests, &p.Tokens, &p.AvgTPS); err != nil {
+		if err := rows.Scan(&p.Timestamp, &p.Requests, &p.Tokens, &p.AvgTPS, &p.PeakTPS); err != nil {
 			return nil, err
 		}
 		result = append(result, p)
@@ -748,51 +1067,34 @@ func (d *Database) GetTpsSeries(since, interval, project, source string) ([]TpsS
 	return result, rows.Err()
 }
 
-// LiveSession represents an active session.
-type LiveSession struct {
-	CLI          string  `json:"cli"`
-	SessionID    string  `json:"session_id"`
-	Provider     string  `json:"provider"`
-	Model        string  `json:"model"`
-	TokensInput  int     `json:"tokens_input"`
-	TokensOutput int     `json:"tokens_output"`
-	CostUSD      float64 `json:"cost_usd"`
-	Project      string  `json:"project"`
-	LastUpdated  string  `json:"last_updated"`
-}
-
-// GetLiveSessions returns sessions active in the last 10 seconds.
-func (d *Database) GetLiveSessions() ([]LiveSession, error) {
-	cutoff := time.Now().UTC().Add(-10 * time.Second).Format(time.RFC3339)
-	q := `SELECT source, session_file, project_id, provider, model,
-		SUM(prompt_tokens), SUM(completion_tokens), SUM(cost_usd), MAX(timestamp)
-		FROM token_events
-		WHERE timestamp != '' AND timestamp >= ?
-		GROUP BY source, session_file, provider, model
-		ORDER BY MAX(timestamp) DESC LIMIT 50`
-	rows, err := d.db.Query(q, cutoff)
-	if err != nil {
-		return nil, err
+// GetLiveTPS returns measured output throughput (completion tokens per
+// measured generation second) for events in the last N seconds. Total tokens
+// include prompt/cache, so dividing them by the wall-clock window inflates the
+// number; and streaming latency includes thinking time before the first token,
+// so per-second throughput comes from completion tokens over the time the
+// model actually spent generating (streaming_ms when plausible, else latency).
+// Only proxy rows count: imported rows carry historical sessions with no
+// timing and would fabricate activity the moment an import command runs.
+func (d *Database) GetLiveTPS(seconds int) (float64, error) {
+	if seconds <= 0 {
+		seconds = 10
 	}
-	defer rows.Close()
-	var result []LiveSession
-	for rows.Next() {
-		var ls LiveSession
-		var src string
-		if err := rows.Scan(&src, &ls.SessionID, &ls.Project, &ls.Provider, &ls.Model,
-			&ls.TokensInput, &ls.TokensOutput, &ls.CostUSD, &ls.LastUpdated); err != nil {
-			return nil, err
-		}
-		ls.CLI = src
-		if idx := strings.Index(src, ":"); idx >= 0 {
-			ls.CLI = src[idx+1:]
-		}
-		if ls.Project == "" {
-			ls.Project = "default"
-		}
-		result = append(result, ls)
+	cutoffUnix := time.Now().UTC().Add(-time.Duration(seconds) * time.Second).Unix()
+	var completion int
+	var genSecs float64
+	err := d.db.QueryRow(
+		`SELECT COALESCE(SUM(completion_tokens),0),
+		 COALESCE(SUM(`+genSecsExpr+`)/1000.0, 0)
+		 FROM token_events
+		 WHERE CAST(strftime('%s', timestamp) AS INTEGER) >= ?
+		   AND source = 'proxy'
+		   AND source = 'proxy'
+		   AND (streaming_ms > 0 OR latency_ms > 0)`, cutoffUnix).
+		Scan(&completion, &genSecs)
+	if err != nil || genSecs <= 0 {
+		return 0, err
 	}
-	return result, rows.Err()
+	return float64(completion) / genSecs, nil
 }
 
 // RecentEventsFiltered returns recent events with all dashboard filters.

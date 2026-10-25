@@ -265,7 +265,7 @@ func (o *OmpImporter) Scan(since string) domain.ScanResult {
 	if !o.Detect() {
 		return domain.ScanResult{CLI: "omp", Available: false, Path: sessionsDir}
 	}
-	
+
 	var totalFiles, totalEntries int
 	filepath.WalkDir(sessionsDir, func(path string, d os.DirEntry, err error) error {
 		if err != nil || d.IsDir() || !strings.HasSuffix(path, ".jsonl") {
@@ -284,7 +284,7 @@ func (o *OmpImporter) Scan(since string) domain.ScanResult {
 		}
 		return nil
 	})
-	
+
 	return domain.ScanResult{
 		CLI:          "omp",
 		Available:    true,
@@ -300,28 +300,28 @@ func (o *OmpImporter) IterUsages(since string, out chan<- domain.RawUsage) {
 	if !o.Detect() {
 		return
 	}
-	
+
 	var sinceTime time.Time
 	if since != "" {
 		sinceTime, _ = time.Parse(time.RFC3339, since)
 	}
-	
+
 	filepath.WalkDir(sessionsDir, func(path string, d os.DirEntry, err error) error {
 		if err != nil || d.IsDir() || !strings.HasSuffix(path, ".jsonl") {
 			return nil
 		}
-		
+
 		data, err := os.ReadFile(path)
 		if err != nil {
 			return nil
 		}
-		
+
 		// Extract session ID from filename
 		sessionID := filepath.Base(path)
 		if ext := filepath.Ext(sessionID); ext != "" {
 			sessionID = sessionID[:len(sessionID)-len(ext)]
 		}
-		
+
 		// Extract project from directory structure
 		relPath, _ := filepath.Rel(sessionsDir, path)
 		project := filepath.Dir(relPath)
@@ -332,23 +332,23 @@ func (o *OmpImporter) IterUsages(since string, out chan<- domain.RawUsage) {
 		project = strings.ReplaceAll(project, "--", "/")
 		project = strings.TrimPrefix(project, "-")
 		project = strings.TrimSuffix(project, "-")
-		
+
 		entryIdx := 0
 		for _, line := range strings.Split(string(data), "\n") {
 			if !strings.Contains(line, `"type":"model_usage"`) {
 				continue
 			}
-			
+
 			var event map[string]interface{}
 			if err := json.Unmarshal([]byte(line), &event); err != nil {
 				continue
 			}
-			
+
 			tsStr, _ := event["timestamp"].(string)
 			if tsStr == "" {
 				continue
 			}
-			
+
 			ts, err := time.Parse(time.RFC3339Nano, tsStr)
 			if err != nil {
 				ts, err = time.Parse(time.RFC3339, tsStr)
@@ -356,21 +356,21 @@ func (o *OmpImporter) IterUsages(since string, out chan<- domain.RawUsage) {
 					continue
 				}
 			}
-			
+
 			if !sinceTime.IsZero() && ts.Before(sinceTime) {
 				continue
 			}
-			
+
 			usage, ok := event["usage"].(map[string]interface{})
 			if !ok {
 				continue
 			}
-			
+
 			inputTokens := toInt(usage, "input")
 			outputTokens := toInt(usage, "output")
 			cacheRead := toInt(usage, "cacheRead")
 			cacheWrite := toInt(usage, "cacheWrite")
-			
+
 			costMap, _ := usage["cost"].(map[string]interface{})
 			var costTotal float64
 			if costMap != nil {
@@ -378,14 +378,14 @@ func (o *OmpImporter) IterUsages(since string, out chan<- domain.RawUsage) {
 					costTotal = v
 				}
 			}
-			
+
 			provider, _ := event["provider"].(string)
 			model, _ := event["model"].(string)
 			entryID, _ := event["id"].(string)
 			if entryID == "" {
 				entryID = fmt.Sprintf("%s:%d", sessionID, entryIdx)
 			}
-			
+
 			out <- domain.RawUsage{
 				CLI:              "omp",
 				SessionID:        sessionID,
