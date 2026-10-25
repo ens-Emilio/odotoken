@@ -1,7 +1,8 @@
 import { useMemo } from 'react'
 import { Select, type SelectGroup } from './ui/Select'
 import { Card, CardHeader, Badge } from './ui/Card'
-import { useTimezone } from './context/TimezoneContext'
+import { useTimezone } from './context/useTimezone'
+import { APP_VERSION } from './version'
 
 function getOffsetString(tz: string): string {
   try {
@@ -74,7 +75,7 @@ export default function SettingsView() {
           </div>
           <div className="flex items-center justify-between">
             <span className="text-[var(--text-muted)]">Version</span>
-            <Badge>0.2.0</Badge>
+            <Badge>{APP_VERSION}</Badge>
           </div>
           <div className="flex items-center justify-between">
             <span className="text-[var(--text-muted)]">Dashboard refresh</span>

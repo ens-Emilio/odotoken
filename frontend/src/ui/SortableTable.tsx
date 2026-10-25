@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useMemo, useState } from 'react'
 import { ArrowDown, ArrowUp, ChevronsUpDown } from 'lucide-react'
 
 export interface Column<T> {
@@ -29,11 +29,6 @@ export function SortableTable<T>({ rows, columns, pageSize = 25, rowKey, onRowCl
   const [sortKey, setSortKey] = useState<string | null>(null)
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc')
   const [page, setPage] = useState(0)
-  useEffect(() => {
-    const maxPage = Math.max(0, Math.ceil(filtered.length / pageSize) - 1)
-    if (page > maxPage) setPage(0)
-  }, [filtered.length, pageSize, page])
-  useEffect(() => { setPage(0) }, [sortKey, sortDir, filter])
 
   const sorted = useMemo(() => {
     if (!sortKey) return filtered
@@ -50,10 +45,13 @@ export function SortableTable<T>({ rows, columns, pageSize = 25, rowKey, onRowCl
   }, [filtered, sortKey, sortDir, columns])
 
   const pageCount = Math.max(1, Math.ceil(sorted.length / pageSize))
-  const safePage = Math.min(page, pageCount - 1)
+  const safePage = page >= pageCount ? 0 : page
   const pageRows = sorted.slice(safePage * pageSize, (safePage + 1) * pageSize)
 
+  const onFilterChange = (value: string) => { setFilter(value); setPage(0) }
+
   const toggleSort = (key: string) => {
+    setPage(0)
     if (sortKey === key) {
       setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'))
     } else {
@@ -66,8 +64,8 @@ export function SortableTable<T>({ rows, columns, pageSize = 25, rowKey, onRowCl
     <div>
       {searchable && searchKeys?.length ? (
         <div className="flex items-center gap-2 px-3 py-2 border-b border-[var(--border-soft)]">
-          <input value={filter} onChange={(e) => setFilter(e.target.value)} placeholder="Filter…" aria-label="Filter table" className="w-full max-w-xs rounded-md border border-[var(--border)] bg-[var(--bg)] px-2.5 py-1.5 text-[12px] placeholder:text-[var(--text-faint)] focus:outline-none focus:ring-2 focus:ring-[var(--brand)]" />
-          {filter && <button onClick={() => setFilter('')} className="text-[11px] text-[var(--text-soft)] hover:text-[var(--text-strong)]">Clear</button>}
+          <input value={filter} onChange={(e) => onFilterChange(e.target.value)} placeholder="Filter…" aria-label="Filter table" className="w-full max-w-xs rounded-md border border-[var(--border)] bg-[var(--bg)] px-2.5 py-1.5 text-[12px] placeholder:text-[var(--text-faint)] focus:outline-none focus:ring-2 focus:ring-[var(--brand)]" />
+          {filter && <button onClick={() => onFilterChange('')} className="text-[11px] text-[var(--text-soft)] hover:text-[var(--text-strong)]">Clear</button>}
           <span className="ml-auto text-[11px] text-[var(--text-faint)]">{filtered.length !== rows.length ? `${filtered.length}/${rows.length} rows` : `${rows.length} rows`}</span>
         </div>
       ) : null}
@@ -78,15 +76,25 @@ export function SortableTable<T>({ rows, columns, pageSize = 25, rowKey, onRowCl
               {columns.map((col) => (
                 <th
                   key={col.key}
-                  className={`py-2.5 px-3 text-[11px] font-medium uppercase tracking-wider ${col.align === 'right' ? 'text-right' : 'text-left'} ${col.sortValue ? 'cursor-pointer select-none' : ''} ${sortKey === col.key ? 'text-[var(--text-strong)]' : 'text-[var(--text-soft)] hover:text-[var(--text-strong)]'} ${col.width ?? ''}`}
+                  scope="col"
+                  aria-sort={sortKey === col.key ? (sortDir === 'asc' ? 'ascending' : 'descending') : 'none'}
+                  tabIndex={col.sortValue ? 0 : undefined}
+                  role={col.sortValue ? 'button' : undefined}
+                  onKeyDown={col.sortValue ? (event) => {
+                    if (event.key === 'Enter' || event.key === ' ') {
+                      event.preventDefault()
+                      toggleSort(col.key)
+                    }
+                  } : undefined}
+                  className={`py-2.5 px-3 text-[11px] font-medium uppercase tracking-wider ${col.align === 'right' ? 'text-right' : 'text-left'} ${col.sortValue ? 'cursor-pointer select-none focus:outline-none focus:ring-2 focus:ring-[var(--brand)]' : ''} ${sortKey === col.key ? 'text-[var(--text-strong)]' : 'text-[var(--text-soft)] hover:text-[var(--text-strong)]'} ${col.width ?? ''}`}
                   onClick={col.sortValue ? () => toggleSort(col.key) : undefined}
                 >
                   <span className={`inline-flex items-center gap-1 ${col.align === 'right' ? 'flex-row-reverse' : ''}`}>
                     {col.header}
                     {col.sortValue && (
                       sortKey === col.key
-                        ? (sortDir === 'asc' ? <ArrowUp className="h-3 w-3" /> : <ArrowDown className="h-3 w-3" />)
-                        : <ChevronsUpDown className="h-3 w-3 opacity-40" />
+                        ? (sortDir === 'asc' ? <ArrowUp aria-hidden className="h-3 w-3" /> : <ArrowDown aria-hidden className="h-3 w-3" />)
+                        : <ChevronsUpDown aria-hidden className="h-3 w-3 opacity-40" />
                     )}
                   </span>
                 </th>
@@ -99,7 +107,14 @@ export function SortableTable<T>({ rows, columns, pageSize = 25, rowKey, onRowCl
             ) : pageRows.map((row) => (
               <tr
                 key={rowKey(row)}
-                className={`hover:bg-[var(--bg-fill-tertiary)] ${onRowClick ? 'cursor-pointer' : ''} ${activeRowKey === rowKey(row) ? 'bg-[var(--bg-fill-tertiary)]' : ''}`}
+                tabIndex={onRowClick ? 0 : undefined}
+                onKeyDown={onRowClick ? (event) => {
+                  if (event.key === 'Enter' || event.key === ' ') {
+                    event.preventDefault()
+                    onRowClick(row)
+                  }
+                } : undefined}
+                className={`hover:bg-[var(--bg-fill-tertiary)] ${onRowClick ? 'cursor-pointer focus:outline-none focus:ring-2 focus:ring-inset focus:ring-[var(--brand)]' : ''} ${activeRowKey === rowKey(row) ? 'bg-[var(--bg-fill-tertiary)]' : ''}`}
                 onClick={onRowClick ? () => onRowClick(row) : undefined}
               >
                 {columns.map((col) => (

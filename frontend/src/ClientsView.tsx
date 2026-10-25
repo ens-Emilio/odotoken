@@ -1,15 +1,19 @@
+import { useMemo } from 'react'
 import { useStats } from './api'
 import { formatNumber, formatCurrency, sinceForFilter } from './format'
-import { Card, CardHeader, Badge } from './ui/Card'
+import { Card, CardHeader, Badge, Empty } from './ui/Card'
 import { SortableTable, type Column } from './ui/SortableTable'
 import type { ClientRow } from './types'
+import { useTimezone } from './context/useTimezone'
 
 export default function ClientsView({ timeFilter, project, source, tag }: { timeFilter: string; project: string; source: string; tag: string }) {
-  const since = sinceForFilter(timeFilter)
-  const { data, isLoading } = useStats(since, project, source, tag)
+  const { timezone } = useTimezone()
+  const since = useMemo(() => sinceForFilter(timeFilter, timezone), [timeFilter, timezone])
+  const { data, isLoading, isError, refetch } = useStats(since, project, source, tag, timezone)
 
   if (isLoading) return <div className="p-5"><div className="h-64 animate-pulse rounded-[var(--radius)] bg-[var(--bg-fill-tertiary)]" /></div>
-  if (!data) return null
+  if (isError || !data) return <div className="p-5"><Card><Empty label="Could not load client usage." hint="The stats service did not respond." onRetry={() => { void refetch() }} /></Card></div>
+  if (data.by_client.length === 0) return <div className="p-5"><Card><Empty label="No client activity in this period." hint="Change the time range or send a proxied request." /></Card></div>
 
   const columns: Column<ClientRow>[] = [
     { key: 'app', header: 'Client App', render: (c) => <Badge>{c.client_app}</Badge>, sortValue: (c) => c.client_app },

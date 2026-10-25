@@ -1,20 +1,21 @@
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { useEvents } from './api'
 import { formatNumber, formatCurrency, formatLatency, sinceForFilter, formatTimestamp } from './format'
-import { Card, CardHeader, Badge } from './ui/Card'
+import { Card, CardHeader, Badge, Empty } from './ui/Card'
 import { SortableTable, type Column } from './ui/SortableTable'
 import { Dialog } from './ui/Dialog'
 import type { EventRow } from './types'
-import { useTimezone } from './context/TimezoneContext'
+import { useTimezone } from './context/useTimezone'
 
 export default function EventsView({ timeFilter, project, source, tag }: { timeFilter: string; project: string; source: string; tag: string }) {
-  const since = sinceForFilter(timeFilter)
- const { data, isLoading } = useEvents(since, project, source === 'all' ? undefined : source, tag)
+  const { timezone } = useTimezone()
+  const since = useMemo(() => sinceForFilter(timeFilter, timezone), [timeFilter, timezone])
   const [selected, setSelected] = useState<EventRow | null>(null)
- const { timezone } = useTimezone()
+  const { data, isLoading, isError, refetch } = useEvents(since, project, source === 'all' ? undefined : source, tag)
 
   if (isLoading) return <div className="p-5"><div className="h-64 animate-pulse rounded-[var(--radius)] bg-[var(--bg-fill-tertiary)]" /></div>
-  if (!data) return null
+  if (isError || !data) return <div className="p-5"><Card><Empty label="Could not load request events." hint="The stats service did not respond." onRetry={() => { void refetch() }} /></Card></div>
+  if (data.length === 0) return <div className="p-5"><Card><Empty label="No requests in this period." hint="Change the time range or send a proxied request." /></Card></div>
 
   const columns: Column<EventRow>[] = [
    { key: 'timestamp', header: 'Time', render: (e) => <span className="num text-[var(--text-soft)]">{formatTimestamp(e.timestamp, timezone)}</span>, sortValue: (e) => e.timestamp },

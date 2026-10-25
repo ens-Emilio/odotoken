@@ -1,8 +1,6 @@
-import { useEffect, useState } from 'react'
 import { PanelLeftClose, PanelLeftOpen } from 'lucide-react'
 import type { ViewId } from './views'
-
-type ThemeMode = 'light' | 'dark' | 'system'
+import { APP_TAGLINE, APP_VERSION } from './version'
 
 const VIEW_META: Record<ViewId, { label: string }> = {
   overview: { label: 'Overview' },
@@ -18,26 +16,6 @@ const VIEW_GROUPS: { label: string; ids: ViewId[] }[] = [
   { label: 'Control', ids: ['guard', 'settings'] },
 ]
 
-function applyTheme(mode: ThemeMode) {
-  const dark = mode === 'dark' || (mode === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches)
-  document.documentElement.classList.toggle('dark', dark)
-}
-
-export function useTheme() {
-  const [mode, setMode] = useState<ThemeMode>(() => (localStorage.getItem('odt-theme') as ThemeMode) || 'system')
-  useEffect(() => {
-    applyTheme(mode)
-    localStorage.setItem('odt-theme', mode)
-    if (mode === 'system') {
-      const mq = window.matchMedia('(prefers-color-scheme: dark)')
-      const onChange = () => applyTheme('system')
-      mq.addEventListener('change', onChange)
-      return () => mq.removeEventListener('change', onChange)
-    }
-  }, [mode])
-  return { mode, setMode }
-}
-
 export function Sidebar({ view, onView, guardBreached, open, onToggle }: { view: ViewId; onView: (v: ViewId) => void; guardBreached: boolean; open: boolean; onToggle: () => void }) {
   const nav = (
     <>
@@ -48,7 +26,7 @@ export function Sidebar({ view, onView, guardBreached, open, onToggle }: { view:
         {open && (
           <div className="flex flex-col leading-none">
             <span className="text-[14px] font-semibold tracking-tight text-[var(--text-strong)]">odotoken</span>
-            <span className="text-[10px] text-[var(--text-faint)]">v0.2.0 · proxy</span>
+            <span className="text-[10px] text-[var(--text-faint)]">v{APP_VERSION} · {APP_TAGLINE}</span>
           </div>
         )}
       </div>
@@ -60,6 +38,7 @@ export function Sidebar({ view, onView, guardBreached, open, onToggle }: { view:
             <div className="space-y-0.5">
               {group.ids.map((v) => (
                 <button
+                  key={v}
                   aria-current={view === v ? 'page' : undefined}
                   aria-label={VIEW_META[v].label}
                   onClick={() => {

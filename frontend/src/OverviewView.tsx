@@ -1,11 +1,11 @@
 import { useMemo } from 'react'
-import { useStats, useForecast } from './api'
-import { formatNumber, formatNumberCompact, formatCurrency, formatLatency, formatTps, sinceForFilter, formatTimestamp, formatTime, formatDate } from './format'
+import { useForecast, useLiveSessions, useStats } from './api'
+import { formatNumber, formatNumberCompact, formatCurrency, formatLatency, formatTps, sinceForFilter, formatTimestamp, formatTime } from './format'
 import { Card, CardHeader, Badge } from './ui/Card'
 import { SortableTable, type Column } from './ui/SortableTable'
 import { BarChart, Bar, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts'
 import type { EventRow, ProjectRow, ModelRow, SourceRow, LiveSession, ForecastPoint, Anomaly } from './types'
-import { useTimezone } from './context/TimezoneContext'
+import { useTimezone } from './context/useTimezone'
 
 const PIE_COLORS = ['var(--chart-1)', 'var(--chart-2)', 'var(--chart-3)', 'var(--chart-4)', 'var(--chart-5)', 'var(--chart-6)', 'var(--chart-7)']
 
@@ -32,11 +32,11 @@ function Kpi({ label, value, sub, color }: { label: string; value: string; sub: 
 
 export default function OverviewView({ timeFilter, project, source, tag }: { timeFilter: string; project: string; source: string; tag: string }) {
  const { timezone } = useTimezone()
- const since = useMemo(() => sinceForFilter(timeFilter), [timeFilter])
- const { data, isLoading, error } = useStats(since, project, source, tag)
- const { data: forecastData } = useForecast(tag !== 'all' ? tag : undefined)
+ const since = useMemo(() => sinceForFilter(timeFilter, timezone), [timeFilter, timezone])
+ const { data, isLoading, error } = useStats(since, project, source, tag, timezone)
+ const { data: forecastData } = useForecast(tag !== 'all' ? tag : undefined, timezone)
+ const { data: liveSessions = [] } = useLiveSessions()
 
- const liveSessions = data?.live_sessions ?? []
  const recentEvents = data?.recent_events ?? []
  const pieData = useMemo(() => {
    const src = data?.by_model ?? []
@@ -57,6 +57,13 @@ export default function OverviewView({ timeFilter, project, source, tag }: { tim
     { key: 'latency', header: 'Latency', align: 'right', render: (e) => <span className="num tabular-nums text-[var(--text-soft)]">{formatLatency(e.latency_ms)}</span>, sortValue: (e) => e.latency_ms },
     { key: 'cost', header: 'Cost', align: 'right', render: (e) => <span className="num tabular-nums text-[var(--brand-ink)]">{formatCurrency(e.cost_usd)}</span>, sortValue: (e) => e.cost_usd },
   ]
+
+  const exportQuery = new URLSearchParams()
+  if (since) exportQuery.set('since', since)
+  if (source !== 'all') exportQuery.set('source', source)
+  if (project !== 'all') exportQuery.set('project', project)
+  if (tag !== 'all') exportQuery.set('tag', tag)
+  const exportSuffix = exportQuery.toString() ? `?${exportQuery.toString()}` : ''
 
  if (isLoading) return (
    <div className="space-y-5 p-5">
@@ -84,24 +91,25 @@ export default function OverviewView({ timeFilter, project, source, tag }: { tim
           </div>
           <div className="mt-2 flex flex-wrap gap-2">
 {(forecastData.forecast ?? []).map((f: ForecastPoint) => (
-              <span key={f.day} className="rounded bg-[var(--bg-fill-secondary)] px-2 py-1 text-[11px] tabular-nums">{formatDate(f.day + 'T00:00:00Z', timezone).slice(5)}: {formatCurrency(f.cost_usd)}</span>
+              <span key={f.day} className="rounded bg-[var(--bg-fill-secondary)] px-2 py-1 text-[11px] tabular-nums">{f.day.slice(5)}: {formatCurrency(f.cost_usd)}</span>
             ))}
           </div>
           {(forecastData.anomalies?.length ?? 0) > 0 && (
-<div className="mt-2 text-[11px] text-[var(--danger-ink)]">Anomaly: {(forecastData.anomalies ?? []).map((a: Anomaly) => `${formatDate(a.day + 'T00:00:00Z', timezone).slice(5)} ${formatCurrency(a.cost_usd)} > ${formatCurrency(a.threshold)}`).join(', ')}</div>
+<div className="mt-2 text-[11px] text-[var(--danger-ink)]">Anomaly: {(forecastData.anomalies ?? []).map((a: Anomaly) => `${a.day.slice(5)} ${formatCurrency(a.cost_usd)} > ${formatCurrency(a.threshold)}`).join(', ')}</div>
           )}
         </Card>
       )}
 
       {/* KPIs — always 5, Saved shows $0.00 when absent */}
-      <div className="flex justify-end">
-        <a href={`/api/stats.csv${since ? `?since=${encodeURIComponent(since)}${source !== 'all' ? `&source=${source}` : ''}${project !== 'all' ? `&project=${project}` : ''}` : source !== 'all' || project !== 'all' ? `?${source !== 'all' ? `source=${source}` : ''}${project !== 'all' ? `${source !== 'all' ? '&' : ''}project=${project}` : ''}` : ''}`} className="rounded-md border border-[var(--border)] bg-[var(--bg-panel)] px-3 py-1.5 text-[11px] font-medium text-[var(--text-muted)] hover:text-[var(--text-strong)]">Export CSV</a>
+      <div className="flex justify-end gap-2">
+        <a href={`/api/stats.csv${exportSuffix}`} className="rounded-md border border-[var(--border)] bg-[var(--bg-panel)] px-3 py-1.5 text-[11px] font-medium text-[var(--text-muted)] hover:text-[var(--text-strong)]">Export CSV</a>
+        <a href={`/api/stats.svg${exportSuffix}`} download="odotoken-stats.svg" className="rounded-md border border-[var(--border)] bg-[var(--bg-panel)] px-3 py-1.5 text-[11px] font-medium text-[var(--text-muted)] hover:text-[var(--text-strong)]">Snapshot SVG</a>
       </div>
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-6">
         <Kpi label="Total Spent" value={formatCurrency(summary?.total_cost_usd ?? 0)} sub="estimated USD" color="text-[var(--text-strong)]" />
         <Kpi label="Total Tokens" value={formatNumber(summary?.total_tokens ?? 0)} sub="prompt + completion" color="text-[var(--text-strong)]" />
         <Kpi label="Cache Read" value={formatNumber(summary?.total_cache_read_tokens ?? 0)} sub="cached tokens" color="text-[var(--text-strong)]" />
-        <Kpi label="Throughput" value={formatTps(tps?.avg_tps)} sub={`peak ${formatTps(tps?.peak_tps)}`} color="text-[var(--chart-1)]" />
+        <Kpi label="Throughput" value={formatTps(tps?.live_tps)} sub={`peak ${formatTps(tps?.peak_tps)} · avg ${formatTps(tps?.avg_tps)}`} color="text-[var(--chart-1)]" />
         <Kpi label="Total Requests" value={formatNumber(summary?.total_requests ?? 0)} sub={`avg ${formatLatency(summary?.avg_latency_ms ?? 0)}`} color="text-[var(--text-strong)]" />
         <Kpi label="Saved vs Cloud" value={formatCurrency(savings?.saved_usd ?? 0)} sub={savings ? `shadow ${formatCurrency(savings.shadow_usd)}` : '—'} color="text-[var(--chart-1)]" />
       </div>
@@ -114,7 +122,7 @@ export default function OverviewView({ timeFilter, project, source, tag }: { tim
             <ResponsiveContainer width="100%" height="100%">
               <BarChart data={daily ?? []} margin={{ left: 4, right: 16, top: 4, bottom: 0 }} barCategoryGap="30%">
                 <CartesianGrid stroke="var(--border-soft)" strokeDasharray="3 3" vertical={false} />
-                <XAxis dataKey="day" stroke="var(--text-soft)" fontSize={10} tickLine={false} axisLine={false} tickFormatter={(v: string) => formatDate(v + 'T00:00:00Z', timezone).slice(5)} />
+                <XAxis dataKey="day" stroke="var(--text-soft)" fontSize={10} tickLine={false} axisLine={false} tickFormatter={(v: string) => v.slice(5)} />
                 <YAxis yAxisId="left" width={42} tickMargin={6} stroke="var(--text-soft)" fontSize={10} tickLine={false} axisLine={false} tickFormatter={(v: number) => formatNumberCompact(v)} />
                 <YAxis yAxisId="right" width={52} tickMargin={6} orientation="right" stroke="var(--text-soft)" fontSize={10} tickLine={false} axisLine={false} tickFormatter={(v: number) => formatCurrency(v)} />
                 <Tooltip contentStyle={{ background: 'var(--bg-elevated)', border: '1px solid var(--border)', borderRadius: 8, fontSize: 12, color: 'var(--text-strong)' }} labelStyle={{ color: 'var(--text-soft)' }} />
@@ -220,11 +228,11 @@ export default function OverviewView({ timeFilter, project, source, tag }: { tim
         </Card>
       )}
 
-      {/* Live sessions */}
+      {/* In-flight model requests */}
       <Card>
-        <CardHeader title="Live Sessions" subtitle="currently open across agents" right={<Badge tone="brand">live · 10s</Badge>} />
+        <CardHeader title="Live Runs" subtitle="model requests currently in flight" right={<Badge tone="brand">live · 2s</Badge>} />
         {!liveSessions || liveSessions.length === 0 ? (
-          <div className="px-4 pb-4 text-[12px] text-[var(--text-faint)]">No open sessions</div>
+          <div className="px-4 pb-4 text-[12px] text-[var(--text-faint)]">No model requests in flight</div>
         ) : (
           <div className="overflow-x-auto px-2 pb-3">
             <table className="w-full text-left text-[12px]">
@@ -235,6 +243,7 @@ export default function OverviewView({ timeFilter, project, source, tag }: { tim
                   <th className="py-2 px-3 font-semibold">Model</th>
                   <th className="py-2 px-3 text-right font-semibold">Tokens</th>
                   <th className="py-2 px-3 text-right font-semibold">Cost</th>
+                  <th className="py-2 px-3 text-right font-semibold">Elapsed</th>
                   <th className="py-2 pl-3 pr-2 text-right font-semibold">Last Activity</th>
                 </tr>
               </thead>
@@ -246,6 +255,7 @@ export default function OverviewView({ timeFilter, project, source, tag }: { tim
                     <td className="py-2 px-3 font-medium text-[var(--text-strong)]">{s.model}</td>
                     <td className="py-2 px-3 text-right num tabular-nums">{formatNumber(s.tokens_input + s.tokens_output)}</td>
                     <td className="py-2 px-3 text-right num tabular-nums text-[var(--brand-ink)]">{formatCurrency(s.cost_usd)}</td>
+                    <td className="py-2 px-3 text-right num tabular-nums">{formatLatency(s.elapsed_ms)}</td>
                     <td className="py-2 pr-2 pl-3 text-right text-[11px] text-[var(--text-soft)]">{s.last_updated ? formatTimestamp(s.last_updated, timezone) : '—'}</td>
                   </tr>
                 ))}
@@ -257,7 +267,7 @@ export default function OverviewView({ timeFilter, project, source, tag }: { tim
 
       {/* Recent events */}
       <Card>
-        <CardHeader title="Recent Requests" subtitle="latest 50 events" right={<Badge tone="brand">live · 10s</Badge>} />
+        <CardHeader title="Recent Requests" subtitle="latest 50 events" right={<Badge tone="brand">refreshes every 10s</Badge>} />
         <SortableTable rows={events} rowKey={(e) => e.id} columns={eventColumns} pageSize={10} />
       </Card>
     </div>

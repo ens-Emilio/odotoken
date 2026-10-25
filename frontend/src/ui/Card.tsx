@@ -23,7 +23,7 @@ export function CardHeader({ title, subtitle, right }: { title: string; subtitle
   )
 }
 
-export function Badge({ children, tone = 'neutral' }: { children: ReactNode; tone?: 'neutral' | 'brand' | 'warn' | 'danger' }) {
+export function Badge({ children, tone = 'neutral', title }: { children: ReactNode; tone?: 'neutral' | 'brand' | 'warn' | 'danger'; title?: string }) {
   const tones: Record<string, string> = {
     neutral: 'bg-[var(--bg-subtle)] text-[var(--text-muted)] border-[var(--border)]',
     brand: 'bg-[var(--brand-surface)] text-[var(--brand-ink)] border-transparent',
@@ -31,17 +31,18 @@ export function Badge({ children, tone = 'neutral' }: { children: ReactNode; ton
     danger: 'bg-[var(--danger-soft)] text-[var(--danger-ink)] border-transparent',
   }
   return (
-    <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-medium ${tones[tone]}`}>
+    <span title={title} className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-medium ${tones[tone]}`}>
       {children}
     </span>
   )
 }
 
-export function Empty({ label, hint }: { label: string; hint?: string }) {
+export function Empty({ label, hint, onRetry }: { label: string; hint?: string; onRetry?: () => void }) {
   return (
     <div className="flex flex-col items-center gap-1 py-8 text-center">
       <div className="text-[12px] font-medium text-[var(--text-soft)]">{label}</div>
       {hint && <div className="text-[11px] text-[var(--text-faint)]">{hint}</div>}
+      {onRetry && <button type="button" onClick={onRetry} className="mt-2 rounded-md border border-[var(--border)] bg-[var(--bg-panel)] px-2.5 py-1 text-[11px] font-medium text-[var(--text-strong)] hover:bg-[var(--bg-fill-secondary)] focus:outline-none focus:ring-2 focus:ring-[var(--brand)]">Try again</button>}
     </div>
   )
 }

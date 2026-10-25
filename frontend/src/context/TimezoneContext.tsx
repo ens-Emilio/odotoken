@@ -1,4 +1,5 @@
-import { createContext, useContext, useState, useEffect, type ReactNode } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
+import { TimezoneContext } from './timezone-context'
 
 const STORAGE_KEY = 'odotoken:timezone'
 const DEFAULT_TZ = 'America/Rio_Branco'
@@ -6,24 +7,11 @@ const DEFAULT_TZ = 'America/Rio_Branco'
 // ponytail: computed once at module load; Intl.supportedValuesOf is stable per runtime
 const TIMEZONES = Intl.supportedValuesOf('timeZone')
 
-interface TimezoneContextValue {
-  timezone: string
-  setTimezone: (tz: string) => void
-  timezones: readonly string[]
-}
-
-const TimezoneContext = createContext<TimezoneContextValue | null>(null)
-
 export function TimezoneProvider({ children }: { children: ReactNode }) {
-  const [timezone, setTimezoneState] = useState(DEFAULT_TZ)
-
-  // Load persisted timezone on mount
-  useEffect(() => {
+  const [timezone, setTimezoneState] = useState(() => {
     const stored = localStorage.getItem(STORAGE_KEY)
-    if (stored && TIMEZONES.includes(stored)) {
-      setTimezoneState(stored)
-    }
-  }, [])
+    return stored && TIMEZONES.includes(stored) ? stored : DEFAULT_TZ
+  })
 
   // Persist on change
   useEffect(() => {
@@ -40,10 +28,4 @@ export function TimezoneProvider({ children }: { children: ReactNode }) {
       {children}
     </TimezoneContext.Provider>
   )
-}
-
-export function useTimezone(): TimezoneContextValue {
-  const ctx = useContext(TimezoneContext)
-  if (!ctx) throw new Error('useTimezone must be used within TimezoneProvider')
-  return ctx
 }

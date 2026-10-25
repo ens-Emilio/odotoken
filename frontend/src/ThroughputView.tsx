@@ -1,20 +1,20 @@
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { useTps } from './api'
 import { formatTps, formatNumber, sinceForFilter, formatBucket } from './format'
-import { Card } from './ui/Card'
+import { Card, Empty } from './ui/Card'
 import { SortableTable, type Column } from './ui/SortableTable'
 import { AreaChart, Area, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from 'recharts'
 import type { TpsModelRow, TpsProjectRow } from './types'
-import { useTimezone } from './context/TimezoneContext'
+import { useTimezone } from './context/useTimezone'
 
 export default function ThroughputView({ timeFilter, project, source }: { timeFilter: string; project: string; source: string; tag?: string }) {
   const [interval, setInterval] = useState<'1m' | '1h' | '1d'>('1h')
  const { timezone } = useTimezone()
-  const since = sinceForFilter(timeFilter)
-  const { data, isLoading, error } = useTps(since, interval, project, source)
+  const since = useMemo(() => sinceForFilter(timeFilter, timezone), [timeFilter, timezone])
+  const { data, isLoading, error, refetch } = useTps(since, interval, project, source)
 
   if (isLoading) return <div className="space-y-4 p-5"><Card className="h-64 animate-pulse bg-[var(--bg-fill-secondary)]" /></div>
-  if (error || !data) return <div className="p-5 text-[12px] text-[var(--danger-ink)]">Failed to load TPS.</div>
+  if (error || !data) return <div className="p-5"><Card><Empty label="Could not load throughput." hint="The stats service did not respond." onRetry={() => { void refetch() }} /></Card></div>
 
   const modelCols: Column<TpsModelRow>[] = [
     { key: 'model', header: 'Model', render: (r) => <span className="font-medium text-[var(--text-strong)]">{r.model}</span>, sortValue: (r) => r.model },

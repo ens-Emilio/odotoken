@@ -32,15 +32,36 @@ export function formatTps(n: number | null | undefined): string {
   return '—'
 }
 
-export function sinceForFilter(filter: string): string | undefined {
- if (filter === 'today') {
- const d = new Date()
- d.setHours(0, 0, 0, 0)
- return d.toISOString()
- }
- if (filter === '7d') return new Date(Date.now() - 7 * 86400000).toISOString()
- if (filter === '30d') return new Date(Date.now() - 30 * 86400000).toISOString()
- return undefined
+export function sinceForFilter(filter: string, timezone?: string): string | undefined {
+  if (filter === 'today') {
+    if (timezone && timezone !== 'UTC') {
+      const p = parts(new Date(), timezone)
+      if (!p) return undefined
+      return zonedTimeToUtc(p.y, p.mo, p.d, 0, 0, 0, timezone).toISOString()
+    }
+    const d = new Date()
+    d.setHours(0, 0, 0, 0)
+    return d.toISOString()
+  }
+  if (filter === '7d') return new Date(Date.now() - 7 * 86400000).toISOString()
+  if (filter === '30d') return new Date(Date.now() - 30 * 86400000).toISOString()
+  return undefined
+}
+
+// Convert a wall-clock date in an IANA zone to its UTC instant. The offset can
+// differ at the date boundary, so recalculate after the first estimate.
+function zonedTimeToUtc(y: number, mo: number, d: number, h: number, mi: number, s: number, tz: string): Date {
+  const desired = Date.UTC(y, mo - 1, d, h, mi, s)
+  let instant = desired
+  for (let i = 0; i < 3; i++) {
+    const p = parts(new Date(instant), tz)
+    if (!p) break
+    const observed = Date.UTC(p.y, p.mo - 1, p.d, p.h, p.mi, p.s)
+    const correction = desired - observed
+    if (correction === 0) break
+    instant += correction
+  }
+  return new Date(instant)
 }
 const dtfCache = new Map<string, Intl.DateTimeFormat>()
 function getDtf(tz: string, opts: Intl.DateTimeFormatOptions): Intl.DateTimeFormat {

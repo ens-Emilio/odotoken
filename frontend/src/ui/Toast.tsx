@@ -1,30 +1,18 @@
 import { useEffect, useState } from 'react'
 import { AnimatePresence, motion } from 'motion/react'
 import { AlertTriangle, CircleAlert, CircleCheck } from 'lucide-react'
-
-interface ToastItem {
-  id: number
-  tone: 'ok' | 'warn' | 'error'
-  text: string
-}
-
-let pushFn: ((tone: ToastItem['tone'], text: string) => void) | null = null
-let seq = 0
-
-export function toast(tone: ToastItem['tone'], text: string) {
-  pushFn?.(tone, text)
-}
+import { nextToastID, registerToastPush, type ToastItem } from './toast-store'
 
 export function ToastHost() {
   const [items, setItems] = useState<ToastItem[]>([])
 
   useEffect(() => {
-    pushFn = (tone, text) => {
-      const id = ++seq
+    registerToastPush((tone, text) => {
+      const id = nextToastID()
       setItems((prev) => [...prev, { id, tone, text }])
       setTimeout(() => setItems((prev) => prev.filter((t) => t.id !== id)), 6000)
-    }
-    return () => { pushFn = null }
+    })
+    return () => registerToastPush(null)
   }, [])
 
   const icons = {

@@ -1,11 +1,15 @@
 import { useState } from 'react'
-import { useStats } from './api'
-import { formatNumber, formatCurrency } from './format'
+import { useQueryClient } from '@tanstack/react-query'
+import { useGuardStatus, useStats } from './api'
+import { formatNumber, formatCurrency, formatTimestamp } from './format'
+import { useTimezone } from './context/useTimezone'
 import { Card, CardHeader, Badge } from './ui/Card'
-import { toast } from './ui/Toast'
+import { toast } from './ui/toast-store'
 
 export default function GuardView() {
   const { data, isLoading } = useStats()
+  const { timezone } = useTimezone()
+  const { data: guardStatus } = useGuardStatus()
   if (isLoading) return <div className="p-5"><div className="h-48 animate-pulse rounded-[var(--radius)] bg-[var(--bg-fill-tertiary)]" /></div>
  if (!data) return <div className="p-5"><div className="h-48 animate-pulse rounded-[var(--radius)] bg-[var(--bg-fill-tertiary)]" /></div>
  if (!data.guard) return <div className="p-5 text-center text-[12px] text-[var(--text-soft)]">No spending limits configured — unlimited usage</div>
@@ -14,12 +18,14 @@ export default function GuardView() {
  const cur = guard.current ?? { daily_cost_usd: 0, monthly_cost_usd: 0, daily_tokens: 0, monthly_tokens: 0 }
  const tone = guard.status === 'breached' ? 'danger' : guard.status === 'warning' ? 'warn' : 'brand'
   const nz = (v: number | null) => (v ? v : null)
-  const limits = {
+  const limits: GuardLimits = {
     daily_cost_limit_usd: nz(guard.limits.daily_cost_limit_usd),
     monthly_cost_limit_usd: nz(guard.limits.monthly_cost_limit_usd),
     daily_tokens_limit: nz(guard.limits.daily_tokens_limit),
     monthly_tokens_limit: nz(guard.limits.monthly_tokens_limit),
+    warning_threshold_pct: nz(guard.limits.warning_threshold_pct),
     action_on_breach: guard.limits.action_on_breach,
+    timezone: guard.limits.timezone ?? null,
   }
   const limitRows: [string, number | null, number, 'usd' | 'num'][] = [
     ['Daily Cost', limits.daily_cost_limit_usd, cur.daily_cost_usd, 'usd'],
@@ -64,37 +70,96 @@ export default function GuardView() {
           <CardHeader title="Guard Configuration" subtitle="limits — PATCH /api/guard/limits → config.json (supports webhook_url)" />
           <GuardEditor limits={limits} />
           <div className="space-y-2 px-5 pb-3 text-[11px] leading-relaxed text-[var(--text-soft)]">
-            <div className="flex items-center justify-between text-[12px]"><span className="text-[var(--text-muted)]">Blocking</span><Badge tone={guard.allowed ? 'brand' : 'danger'}>{guard.allowed ? 'no' : 'YES'}</Badge></div>
+            <div className="flex items-center justify-between text-[12px]"><span className="text-[var(--text-muted)]">Blocking</span><Badge tone={guard.limits.action_on_breach === 'block' ? 'danger' : 'brand'}>{guard.limits.action_on_breach === 'block' ? 'enabled' : 'alerts only'}</Badge></div>
             <div className="flex items-start justify-between gap-4 text-[12px]"><span className="text-[var(--text-muted)]">Reason</span><span className="text-right text-[var(--text-strong)]">{guard.reason || '—'}</span></div>
             <p>Edits persist to <code>config.json</code> and hot-reload the guard. Add <code>webhook_url</code> to limits to fire HTTP callbacks on breach.</p>
           </div>
         </Card>
       </div>
+      <Card>
+        <CardHeader title="Budget history" subtitle="state transitions only; repeated polls are deduplicated" />
+        {!guardStatus?.history?.length ? (
+          <div className="px-5 pb-4 text-[12px] text-[var(--text-faint)]">No budget transitions recorded.</div>
+        ) : (
+          <div className="overflow-x-auto px-2 pb-3">
+            <table className="w-full text-left text-[12px]">
+              <thead>
+                <tr className="border-b border-[var(--border)] text-[11px] uppercase tracking-wider text-[var(--text-faint)]">
+                  <th scope="col" className="py-2 pl-2 pr-3 font-semibold">Time</th>
+                  <th scope="col" className="py-2 px-3 font-semibold">State</th>
+                  <th scope="col" className="py-2 px-3 font-semibold">Reason</th>
+                  <th scope="col" className="py-2 pl-3 pr-2 text-right font-semibold">Daily cost</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-[var(--border)]">
+                {guardStatus.history.map((event) => (
+                  <tr key={event.id}>
+                    <td className="py-2 pl-2 pr-3 num text-[var(--text-soft)]">{formatTimestamp(event.timestamp, timezone)}</td>
+                    <td className="py-2 px-3"><Badge tone={event.status === 'breached' ? 'danger' : 'warn'}>{event.status}</Badge></td>
+                    <td className="py-2 px-3 text-[var(--text-strong)]">{event.message}</td>
+                    <td className="py-2 pl-3 pr-2 text-right num">{formatCurrency(event.daily_cost_usd)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </Card>
     </div>
   )
 }
 
+type GuardLimits = {
+  daily_cost_limit_usd: number | null
+  monthly_cost_limit_usd: number | null
+  daily_tokens_limit: number | null
+  monthly_tokens_limit: number | null
+  warning_threshold_pct: number | null
+  action_on_breach: string
+  timezone: string | null
+}
 
-function GuardEditor({ limits }: { limits: any }) {
+
+function GuardEditor({ limits }: { limits: GuardLimits }) {
+  const queryClient = useQueryClient()
   const [form, setForm] = useState({
     daily_cost_limit_usd: limits.daily_cost_limit_usd ?? '',
     monthly_cost_limit_usd: limits.monthly_cost_limit_usd ?? '',
     daily_tokens_limit: limits.daily_tokens_limit ?? '',
     monthly_tokens_limit: limits.monthly_tokens_limit ?? '',
-    action_on_breach: limits.action_on_breach ?? 'alert',
+    warning_threshold_pct: limits.warning_threshold_pct ?? '',
+    action_on_breach: limits.action_on_breach ?? 'block',
+    timezone: limits.timezone ?? '',
   })
   const [saving, setSaving] = useState(false)
   const save = async () => {
     setSaving(true)
-    const body: any = {}
+    const body: Record<string, number | string | null> = {}
     for (const k of ['daily_cost_limit_usd','monthly_cost_limit_usd','daily_tokens_limit','monthly_tokens_limit'] as const) {
       const v = form[k]
       body[k] = v === '' ? null : Number(v)
     }
+    body.warning_threshold_pct = form.warning_threshold_pct === '' ? null : Number(form.warning_threshold_pct)
     body.action_on_breach = form.action_on_breach
-    const res = await fetch('/api/guard/limits', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
-    setSaving(false)
-    if (res.ok) toast('ok', 'Guard limits saved — config.json updated')
+    body.timezone = form.timezone || null
+    try {
+      const res = await fetch('/api/guard/limits', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      })
+      const payload = await res.json().catch(() => null) as { error?: string } | null
+      if (!res.ok) {
+        toast('error', payload?.error || `Could not save guard limits (${res.status})`)
+        return
+      }
+      await queryClient.invalidateQueries({ queryKey: ['stats'] })
+      toast('ok', 'Guard limits saved — config.json updated')
+    } catch (err) {
+      toast('error', err instanceof Error ? `Could not save guard limits: ${err.message}` : 'Could not save guard limits')
+    } finally {
+      setSaving(false)
+    }
   }
   return (
     <div className="space-y-3 px-5 pb-2">
@@ -106,17 +171,25 @@ function GuardEditor({ limits }: { limits: any }) {
           ['monthly_tokens_limit','Monthly tokens'],
         ] as const).map(([k,label]) => (
           <label key={k} className="flex flex-col gap-1">
-            <span className="text-[11px] text-[var(--text-soft)]">{label} (0/null = ∞)</span>
-            <input type="number" value={form[k]} onChange={(e) => setForm({ ...form, [k]: e.target.value })} placeholder="∞" className="rounded-md border border-[var(--border)] bg-[var(--bg)] px-2 py-1.5 text-[12px] focus:outline-none focus:ring-2 focus:ring-[var(--brand)]" />
+            <span className="text-[11px] text-[var(--text-soft)]">{label} (empty = ∞)</span>
+            <input type="number" min="0" step="any" value={form[k]} onChange={(e) => setForm({ ...form, [k]: e.target.value })} placeholder="∞" className="rounded-md border border-[var(--border)] bg-[var(--bg)] px-2 py-1.5 text-[12px] focus:outline-none focus:ring-2 focus:ring-[var(--brand)]" />
           </label>
         ))}
       </div>
+      <label className="flex flex-col gap-1">
+        <span className="text-[11px] text-[var(--text-soft)]">Warning threshold % (empty = 80)</span>
+        <input type="number" min="0" max="100" value={form.warning_threshold_pct} onChange={(e) => setForm({ ...form, warning_threshold_pct: e.target.value })} placeholder="80" className="max-w-[200px] rounded-md border border-[var(--border)] bg-[var(--bg)] px-2 py-1.5 text-[12px] focus:outline-none focus:ring-2 focus:ring-[var(--brand)]" />
+      </label>
       <label className="flex flex-col gap-1">
         <span className="text-[11px] text-[var(--text-soft)]">Action on breach</span>
         <select value={form.action_on_breach} onChange={(e) => setForm({ ...form, action_on_breach: e.target.value })} className="max-w-[200px] rounded-md border border-[var(--border)] bg-[var(--bg)] px-2 py-1.5 text-[12px] focus:outline-none focus:ring-2 focus:ring-[var(--brand)]">
           <option value="alert">alert</option>
           <option value="block">block</option>
         </select>
+      </label>
+      <label className="flex flex-col gap-1">
+        <span className="text-[11px] text-[var(--text-soft)]">Budget timezone (IANA)</span>
+        <input type="text" value={form.timezone} onChange={(e) => setForm({ ...form, timezone: e.target.value })} placeholder="America/Rio_Branco" className="max-w-[300px] rounded-md border border-[var(--border)] bg-[var(--bg)] px-2 py-1.5 text-[12px] focus:outline-none focus:ring-2 focus:ring-[var(--brand)]" />
       </label>
       <button onClick={save} disabled={saving} className="rounded-md bg-[var(--brand)] px-3 py-1.5 text-[12px] font-medium text-white hover:opacity-90 disabled:opacity-50">{saving ? 'Saving…' : 'Save limits'}</button>
     </div>

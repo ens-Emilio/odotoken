@@ -11,10 +11,12 @@ class ErrorBoundary extends Component<{ children: ReactNode }, { error: Error | 
 
 import { TimezoneProvider } from './context/TimezoneContext'
 import { AnimatePresence, motion } from 'motion/react'
-import { Sidebar, useTheme } from './Shell'
-import { ToastHost, toast } from './ui/Toast'
+import { Sidebar } from './Shell'
+import { useTheme } from './theme'
+import { ToastHost } from './ui/Toast'
+import { toast } from './ui/toast-store'
 import { Select } from './ui/Select'
-import { useStats } from './api'
+import { useFilterOptions, useGuardStatus } from './api'
 import type { ViewId } from './views'
 import { OverviewView, ModelsView, ClientsView, EventsView, ThroughputView, GuardView, SettingsView } from './views'
 
@@ -36,26 +38,30 @@ export default function App() {
     return (p.get('view') as ViewId) || (location.hash ? (location.hash.slice(1) as ViewId) : 'overview')
   })
   const initParams = new URLSearchParams(location.search)
-  const [timeFilter, setTimeFilter] = useState(() => initParams.get('since') || 'today')
+  const [timeFilter, setTimeFilter] = useState(() => {
+    const value = initParams.get('since')
+    return value === 'all' ? 'all' : value || 'today'
+  })
   const [project, setProject] = useState(() => initParams.get('project') || 'all')
   const [tag, setTag] = useState(() => initParams.get('tag') || 'all')
   const [source, setSource] = useState(() => initParams.get('source') || 'all')
   const [sidebarOpen, setSidebarOpen] = useState(true)
   const theme = useTheme()
 
- const { data, error } = useStats(undefined, project, source)
- const guardStatus = data?.guard?.status ?? 'ok'
+ const { data: guardData, error } = useGuardStatus()
+ const guardStatus = guardData?.status ?? 'ok'
  const prevStatus = useRef(guardStatus)
- if (error) console.error('Stats fetch failed:', error)
+ if (error) console.error('Guard status fetch failed:', error)
+ const { data: filterOptions } = useFilterOptions(project, source)
 
   // Toast when guard status transitions into warning/breached
   useEffect(() => {
     if (guardStatus !== prevStatus.current) {
-      if (guardStatus === 'warning') toast('warn', 'Budget warning: ' + (data?.guard.reason || 'threshold reached'))
-      if (guardStatus === 'breached') toast('error', 'Budget limit breached: ' + (data?.guard.reason || ''))
+      if (guardStatus === 'warning') toast('warn', 'Budget warning: ' + (guardData?.reason || 'threshold reached'))
+      if (guardStatus === 'breached') toast('error', 'Budget limit breached: ' + (guardData?.reason || ''))
       prevStatus.current = guardStatus
     }
-  }, [guardStatus, data?.guard?.reason])
+  }, [guardStatus, guardData?.reason])
 
   const changeView = (v: ViewId) => {
     setView(v)
@@ -131,15 +137,15 @@ export default function App() {
                 <div className="space-y-2">
                   <div>
                     <label className="mb-1 block text-[10px] font-semibold uppercase tracking-wider text-[var(--text-soft)]">Source</label>
- <Select value={source} onChange={(v) => { setSource(v); if (v === 'all') document.querySelector('.group > div')?.classList.add('hidden') }} dropdownClassName="select-dropdown-constrained" options={[{ value: 'all', label: 'All sources' }, { value: 'proxy', label: 'Proxy' }, { value: 'import', label: 'Imported' }, ...(data?.by_source ?? []).map((s: { source: string; requests: number }) => ({ value: s.source, label: `${s.source} (${s.requests})` }))]} />
+ <Select value={source} onChange={(v) => { setSource(v); if (v === 'all') document.querySelector('.group > div')?.classList.add('hidden') }} dropdownClassName="select-dropdown-constrained" options={[{ value: 'all', label: 'All sources' }, { value: 'proxy', label: 'Proxy' }, { value: 'import', label: 'Imported' }, ...(filterOptions?.by_source ?? []).map((s) => ({ value: s.source ?? '', label: `${s.source} (${s.requests})` }))]} />
                   </div>
                   <div>
                     <label className="mb-1 block text-[10px] font-semibold uppercase tracking-wider text-[var(--text-soft)]">Project</label>
- <Select value={project} onChange={(v) => { setProject(v); if (v === 'all') document.querySelector('.group > div')?.classList.add('hidden') }} dropdownClassName="select-dropdown-constrained" options={[{ value: 'all', label: 'All projects' }, ...(data?.by_project ?? []).map((p: { project_id: string; requests: number }) => ({ value: p.project_id, label: `${p.project_id} (${p.requests})` }))]} />
+ <Select value={project} onChange={(v) => { setProject(v); if (v === 'all') document.querySelector('.group > div')?.classList.add('hidden') }} dropdownClassName="select-dropdown-constrained" options={[{ value: 'all', label: 'All projects' }, ...(filterOptions?.by_project ?? []).map((p) => ({ value: p.project_id ?? '', label: `${p.project_id} (${p.requests})` }))]} />
                   </div>
                   <div>
                     <label className="mb-1 block text-[10px] font-semibold uppercase tracking-wider text-[var(--text-soft)]">Tag</label>
- <Select value={tag} onChange={(v) => { setTag(v); if (v === 'all') document.querySelector('.group > div')?.classList.add('hidden') }} dropdownClassName="select-dropdown-constrained" options={[{ value: 'all', label: 'All tags' }, ...(data?.by_tag ?? []).map((t: { tag: string; requests: number }) => ({ value: t.tag, label: `${t.tag} (${t.requests})` }))]} />
+ <Select value={tag} onChange={(v) => { setTag(v); if (v === 'all') document.querySelector('.group > div')?.classList.add('hidden') }} dropdownClassName="select-dropdown-constrained" options={[{ value: 'all', label: 'All tags' }, ...(filterOptions?.by_tag ?? []).map((t) => ({ value: t.tag ?? '', label: `${t.tag} (${t.requests})` }))]} />
                   </div>
                 </div>
               </div>

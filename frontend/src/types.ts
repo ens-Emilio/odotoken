@@ -20,6 +20,7 @@ export interface ModelRow {
   cache_read_tokens: number
   cache_write_tokens: number
   cost_usd: number
+  price_missing_count?: number
 }
 
 export interface ClientRow {
@@ -61,7 +62,9 @@ export interface GuardInfo {
     monthly_cost_limit_usd: number | null
     daily_tokens_limit: number | null
     monthly_tokens_limit: number | null
+    warning_threshold_pct: number | null
     action_on_breach: string
+    timezone: string | null
   }
   current?: {
     daily_cost_usd: number
@@ -106,7 +109,7 @@ export interface TpsBucket {
 }
 export interface TpsModelRow { model: string; provider: string; requests: number; completion_tokens: number; total_tokens: number; cost_usd: number; avg_latency_ms: number; tps: number }
 export interface TpsProjectRow { project_id: string; requests: number; completion_tokens: number; total_tokens: number; cost_usd: number; avg_latency_ms: number; tps: number }
-export interface TpsSummary { requests: number; completion_tokens: number; total_tokens: number; total_latency_ms: number; avg_latency_ms: number; avg_tps: number; peak_tps: number }
+export interface TpsSummary { requests: number; completion_tokens: number; total_tokens: number; total_latency_ms: number; avg_latency_ms: number; avg_tps: number; peak_tps: number; live_tps: number }
 export interface TpsData { series: TpsBucket[]; by_model: TpsModelRow[]; by_project: TpsProjectRow[]; summary: TpsSummary; live_tps: number; interval: string }
 export interface TagRow { tag: string; requests: number; total_tokens: number; cost_usd: number }
 export interface ForecastPoint { day: string; cost_usd: number }
@@ -128,6 +131,7 @@ export interface Stats {
 }
 
 export interface LiveSession {
+  run_id: string
   cli: string
   session_id: string
   provider: string
@@ -137,5 +141,7 @@ export interface LiveSession {
   cost_usd: number
   project: string
   title: string
+  started_at: string
   last_updated: string
+  elapsed_ms: number
 }
