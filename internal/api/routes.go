@@ -178,15 +178,6 @@ func countTokens(model, text string, cfg config.Config) int {
 	return int(float64(len(text)) / h.CharsPerToken)
 }
 
-func isCJK(s string) bool {
-	for _, r := range s {
-		if (r >= 0x4E00 && r <= 0x9FFF) || (r >= 0x3040 && r <= 0x309F) || (r >= 0xAC00 && r <= 0xD7AF) {
-			return true
-		}
-	}
-	return false
-}
-
 func writeJSON(w http.ResponseWriter, status int, v interface{}) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
