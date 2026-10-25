@@ -3,13 +3,11 @@ package api
 import (
 	"encoding/json"
 	"net/http"
-	"strings"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/pkoukk/tiktoken-go"
 
 	"github.com/ens-Emilio/odotoken/internal/config"
-	"github.com/ens-Emilio/odotoken/internal/domain"
 	"github.com/ens-Emilio/odotoken/internal/pricing"
 )
 
@@ -29,12 +27,12 @@ type CountMessagesRequest struct {
 
 // CountResponse is the response for /v1/count.
 type CountResponse struct {
-	Model          string  `json:"model"`
-	PromptTokens   int     `json:"prompt_tokens"`
-	TotalTokens    int     `json:"total_tokens"`
-	CostUSD        float64 `json:"cost_usd"`
-	Method         string  `json:"method"`
-	DurationMs     float64 `json:"duration_ms"`
+	Model        string  `json:"model"`
+	PromptTokens int     `json:"prompt_tokens"`
+	TotalTokens  int     `json:"total_tokens"`
+	CostUSD      float64 `json:"cost_usd"`
+	Method       string  `json:"method"`
+	DurationMs   float64 `json:"duration_ms"`
 }
 
 // BatchCountRequest wraps multiple count requests.
@@ -57,9 +55,9 @@ type BatchError struct {
 
 // ModelInfo describes an available model.
 type ModelInfo struct {
-	ID       string  `json:"id"`
-	Provider string  `json:"provider"`
-	InputRate float64 `json:"input_rate_per_1m"`
+	ID         string  `json:"id"`
+	Provider   string  `json:"provider"`
+	InputRate  float64 `json:"input_rate_per_1m"`
 	OutputRate float64 `json:"output_rate_per_1m"`
 }
 
@@ -85,7 +83,7 @@ func Router(cfg config.Config, calc *pricing.Calculator) chi.Router {
 
 func handleCount(w http.ResponseWriter, r *http.Request, cfg config.Config, calc *pricing.Calculator) {
 	var raw map[string]interface{}
-	dec := json.NewDecoder(r.Body)
+	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20))
 	dec.UseNumber()
 	if err := dec.Decode(&raw); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON"})
@@ -131,7 +129,7 @@ func handleCount(w http.ResponseWriter, r *http.Request, cfg config.Config, calc
 
 func handleBatchCount(w http.ResponseWriter, r *http.Request, cfg config.Config, calc *pricing.Calculator) {
 	var req BatchCountRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 10<<20)).Decode(&req); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON"})
 		return
 	}
@@ -177,11 +175,6 @@ func countTokens(model, text string, cfg config.Config) int {
 	if h.CharsPerToken <= 0 {
 		h.CharsPerToken = 4.0
 	}
-	lower := strings.ToLower(model)
-	if isCJK(text) {
-		return int(float64(len([]rune(text))) / 1.5)
-	}
-	_ = lower
 	return int(float64(len(text)) / h.CharsPerToken)
 }
 
@@ -199,6 +192,3 @@ func writeJSON(w http.ResponseWriter, status int, v interface{}) {
 	w.WriteHeader(status)
 	json.NewEncoder(w).Encode(v)
 }
-
-// Ensure domain package is used.
-var _ = domain.UsageResult{}

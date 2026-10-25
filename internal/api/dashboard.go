@@ -2,62 +2,337 @@ package api
 
 import (
 	"encoding/json"
+	"fmt"
 	"math"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 
-	"github.com/go-chi/chi/v5"
+	"github.com/ens-Emilio/odotoken/internal/config"
 	"github.com/ens-Emilio/odotoken/internal/db"
+	"github.com/ens-Emilio/odotoken/internal/domain"
+	"github.com/go-chi/chi/v5"
 )
 
 // DashboardRouter creates the /api router for dashboard endpoints.
-func DashboardRouter(database *db.Database) chi.Router {
-	r := chi.NewRouter()
+func DashboardRouter(
+	database *db.Database,
+	guardChecker func(string) domain.GuardCheckResult,
+	limits func() config.GuardConfig,
+	updateLimits func(config.GuardConfig),
+	configPath string,
+) chi.Router {
+	return dashboardRouter(database, guardChecker, limits, updateLimits, configPath)
+}
 
+func dashboardRouter(
+	database *db.Database,
+	guardChecker func(string) domain.GuardCheckResult,
+	getLimits func() config.GuardConfig,
+	updateLimits func(config.GuardConfig),
+	configPath string,
+) chi.Router {
+	r := chi.NewRouter()
+	limitsView := func(v config.GuardConfig) map[string]interface{} {
+		limit := func(value float64) interface{} {
+			if value == 0 {
+				return nil
+			}
+			return value
+		}
+		tokens := func(value int) interface{} {
+			if value == 0 {
+				return nil
+			}
+			return value
+		}
+		return map[string]interface{}{
+			"daily_cost_limit_usd":   limit(v.DailyCostLimitUSD),
+			"monthly_cost_limit_usd": limit(v.MonthlyCostLimitUSD),
+			"daily_tokens_limit":     tokens(v.DailyTokenLimit),
+			"monthly_tokens_limit":   tokens(v.MonthlyTokenLimit),
+			"warning_threshold_pct":  limit(v.WarningThresholdPct),
+			"action_on_breach":       v.ActionOnBreach,
+			"timezone":               v.Timezone,
+		}
+	}
+	budgetStatus := func(project string) map[string]interface{} {
+		status := map[string]interface{}{
+			"limits": limitsView(getLimits()),
+			"current": map[string]interface{}{
+				"daily_cost_usd":   0.0,
+				"monthly_cost_usd": 0.0,
+				"daily_tokens":     0,
+				"monthly_tokens":   0,
+			},
+			"status":  "disabled",
+			"allowed": true,
+			"reason":  "",
+		}
+		if guardChecker == nil {
+			return status
+		}
+		res := guardChecker(project)
+		status["limits"] = limitsView(getLimits())
+		status["current"] = map[string]interface{}{
+			"daily_cost_usd":   res.CurrentDailyCost,
+			"monthly_cost_usd": res.CurrentMonthlyCost,
+			"daily_tokens":     res.CurrentDailyTokens,
+			"monthly_tokens":   res.CurrentMonthTokens,
+		}
+		status["status"] = res.Status
+		status["allowed"] = res.Allowed
+		status["reason"] = res.Message
+		return status
+	}
+
+	r.Get("/guard/limits", func(w http.ResponseWriter, r *http.Request) {
+		if getLimits == nil {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "guard unavailable"})
+			return
+		}
+		writeJSON(w, http.StatusOK, limitsView(getLimits()))
+	})
+
+	r.Get("/guard/status", func(w http.ResponseWriter, r *http.Request) {
+		if guardChecker == nil {
+			writeJSON(w, http.StatusOK, map[string]interface{}{
+				"status": "disabled", "allowed": true, "reason": "",
+			})
+			return
+		}
+		res := guardChecker(r.URL.Query().Get("project"))
+		events, err := database.RecentGuardEvents(20)
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "guard history unavailable"})
+			return
+		}
+		if events == nil {
+			events = []db.GuardEvent{}
+		}
+		writeJSON(w, http.StatusOK, map[string]interface{}{
+			"status":  res.Status,
+			"allowed": res.Allowed,
+			"reason":  res.Message,
+			"history": events,
+		})
+	})
+
+	r.Patch("/guard/limits", func(w http.ResponseWriter, r *http.Request) {
+		if getLimits == nil || updateLimits == nil {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "guard unavailable"})
+			return
+		}
+		var raw map[string]json.RawMessage
+		dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20))
+		dec.DisallowUnknownFields()
+		if err := dec.Decode(&raw); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON"})
+			return
+		}
+		limits := getLimits()
+		for key, value := range raw {
+			switch key {
+			case "daily_cost_limit_usd":
+				v, ok := decodeLimitFloat(value)
+				if !ok {
+					writeJSON(w, http.StatusBadRequest, map[string]string{"error": "daily_cost_limit_usd must be a number or null"})
+					return
+				}
+				limits.DailyCostLimitUSD = v
+			case "monthly_cost_limit_usd":
+				v, ok := decodeLimitFloat(value)
+				if !ok {
+					writeJSON(w, http.StatusBadRequest, map[string]string{"error": "monthly_cost_limit_usd must be a number or null"})
+					return
+				}
+				limits.MonthlyCostLimitUSD = v
+			case "daily_tokens_limit":
+				v, ok := decodeLimitInt(value)
+				if !ok {
+					writeJSON(w, http.StatusBadRequest, map[string]string{"error": "daily_tokens_limit must be an integer or null"})
+					return
+				}
+				limits.DailyTokenLimit = v
+			case "monthly_tokens_limit":
+				v, ok := decodeLimitInt(value)
+				if !ok {
+					writeJSON(w, http.StatusBadRequest, map[string]string{"error": "monthly_tokens_limit must be an integer or null"})
+					return
+				}
+				limits.MonthlyTokenLimit = v
+			case "warning_threshold_pct":
+				v, ok := decodeLimitFloat(value)
+				if !ok {
+					writeJSON(w, http.StatusBadRequest, map[string]string{"error": "warning_threshold_pct must be a number or null"})
+					return
+				}
+				limits.WarningThresholdPct = v
+			case "action_on_breach":
+				v, ok := decodeOptionalString(value)
+				if !ok {
+					writeJSON(w, http.StatusBadRequest, map[string]string{"error": "action_on_breach must be alert or block"})
+					return
+				}
+				limits.ActionOnBreach = v
+			case "timezone":
+				v, ok := decodeOptionalString(value)
+				if !ok {
+					writeJSON(w, http.StatusBadRequest, map[string]string{"error": "timezone must be an IANA timezone string"})
+					return
+				}
+				if v != "" {
+					if _, err := time.LoadLocation(v); err != nil {
+						writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid timezone"})
+						return
+					}
+				}
+				limits.Timezone = v
+			default:
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "unknown guard limit field"})
+				return
+			}
+		}
+		if limits.ActionOnBreach == "" {
+			limits.ActionOnBreach = "block"
+		}
+		if limits.ActionOnBreach != "alert" && limits.ActionOnBreach != "block" {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "action_on_breach must be alert or block"})
+			return
+		}
+		if limits.DailyCostLimitUSD < 0 || limits.MonthlyCostLimitUSD < 0 ||
+			limits.DailyTokenLimit < 0 || limits.MonthlyTokenLimit < 0 ||
+			limits.WarningThresholdPct < 0 || limits.WarningThresholdPct > 100 {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "limits must be non-negative and warning threshold must be 0..100"})
+			return
+		}
+		if configPath != "" {
+			if err := persistGuardLimits(configPath, limits); err != nil {
+				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": fmt.Sprintf("persist limits: %v", err)})
+				return
+			}
+		}
+		updateLimits(limits)
+		writeJSON(w, http.StatusOK, limitsView(limits))
+	})
+
+	r.Get("/filters", func(w http.ResponseWriter, r *http.Request) {
+		since := resolveSince(r.URL.Query().Get("since"))
+		project := r.URL.Query().Get("project")
+		source := r.URL.Query().Get("source")
+		projects, projectErr := database.GetSummaryByProject(since, source)
+		sources, sourceErr := database.GetSummaryBySource(since, project)
+		tags, tagErr := database.GetSummaryByTag(since, project, source)
+		if projectErr != nil || sourceErr != nil || tagErr != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "filter options unavailable"})
+			return
+		}
+		if projects == nil {
+			projects = []db.ByProject{}
+		}
+		if sources == nil {
+			sources = []db.BySource{}
+		}
+		if tags == nil {
+			tags = []db.ByTag{}
+		}
+		writeJSON(w, http.StatusOK, map[string]interface{}{
+			"by_project": projects,
+			"by_source":  sources,
+			"by_tag":     tags,
+		})
+	})
 	r.Get("/stats", func(w http.ResponseWriter, r *http.Request) {
 		since := resolveSince(r.URL.Query().Get("since"))
 		project := r.URL.Query().Get("project")
 		source := r.URL.Query().Get("source")
 		tag := r.URL.Query().Get("tag")
+		tz := r.URL.Query().Get("tz")
 
-		summary, _ := database.GetSummary(since, project, source, tag)
-		byModel, _ := database.GetSummaryByModel(since, project, source)
-		byClient, _ := database.GetSummaryByClient(since, project, source)
-		byProject, _ := database.GetSummaryByProject(since, source)
-		bySource, _ := database.GetSummaryBySource(since, project)
-		byTag, _ := database.GetSummaryByTag(since, project, source)
-		recentEvents, _ := database.RecentEventsFiltered(50, since, project, source, tag)
-		daily, _ := database.GetDailyUsage(30, since, source)
- liveSessions, _ := database.GetLiveSessions()
- tps, _ := database.GetTpsSummary(since, project, source)
-
+		// A storage failure must be visible. Silently substituting zeroes made
+		// the dashboard look healthy while every metric was fabricated.
+		summary, err := database.GetSummary(since, project, source, tag)
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "stats unavailable"})
+			return
+		}
+		// A failure in any partition must be visible, matching the summary
+		// above. A silently dropped group made one pane look empty or stale
+		// while the rest of the dashboard asserted current data.
+		var partitionErrs []string
+		byModel, err := database.GetSummaryByModel(since, project, source)
+		if err != nil {
+			partitionErrs = append(partitionErrs, "by_model")
+		}
+		byClient, err := database.GetSummaryByClient(since, project, source)
+		if err != nil {
+			partitionErrs = append(partitionErrs, "by_client")
+		}
+		byProject, err := database.GetSummaryByProject(since, source)
+		if err != nil {
+			partitionErrs = append(partitionErrs, "by_project")
+		}
+		bySource, err := database.GetSummaryBySource(since, project)
+		if err != nil {
+			partitionErrs = append(partitionErrs, "by_source")
+		}
+		byTag, err := database.GetSummaryByTag(since, project, source)
+		if err != nil {
+			partitionErrs = append(partitionErrs, "by_tag")
+		}
+		recentEvents, err := database.RecentEventsFiltered(50, since, project, source, tag)
+		if err != nil {
+			partitionErrs = append(partitionErrs, "recent_events")
+		}
+		daily, err := database.GetDailyUsage(30, since, source, tz)
+		if err != nil {
+			partitionErrs = append(partitionErrs, "daily")
+		}
+		liveSessions, err := database.GetLiveSessions()
+		if err != nil {
+			partitionErrs = append(partitionErrs, "live_sessions")
+		}
+		tps, err := database.GetTpsSummary(since, project, source)
+		if err != nil {
+			partitionErrs = append(partitionErrs, "tps")
+		}
+		if len(partitionErrs) > 0 {
+			writeJSON(w, http.StatusInternalServerError, map[string]interface{}{
+				"error":      "stats partitions unavailable",
+				"partitions": partitionErrs,
+			})
+			return
+		}
 		// Normalize summary to match frontend Summary interface
 		summaryMap := map[string]interface{}{
-			"total_requests":          summary.TotalRequests,
-			"total_prompt_tokens":     summary.PromptTokens,
-			"total_completion_tokens": summary.CompletionTokens,
-			"total_tokens":            summary.TotalTokens,
-			"total_cache_read_tokens": summary.CacheReadTokens,
-			"total_cache_write_tokens": 0,
-			"total_cost_usd":          summary.TotalCostUSD,
-			"avg_latency_ms":          summary.AvgLatencyMs,
-			"avg_ttfb_ms":             0.0,
+			"total_requests":           summary.TotalRequests,
+			"total_prompt_tokens":      summary.PromptTokens,
+			"total_completion_tokens":  summary.CompletionTokens,
+			"total_tokens":             summary.TotalTokens,
+			"total_cache_read_tokens":  summary.CacheReadTokens,
+			"total_cache_write_tokens": summary.CacheWriteTokens,
+			"total_cost_usd":           summary.TotalCostUSD,
+			"avg_latency_ms":           summary.AvgLatencyMs,
+			"avg_ttfb_ms":              summary.AvgTTFBMs,
 		}
 
 		// Normalize by_model to match ModelRow interface
 		modelRows := make([]map[string]interface{}, 0, len(byModel))
 		for _, m := range byModel {
 			modelRows = append(modelRows, map[string]interface{}{
-				"model":             m.Model,
-				"provider":          m.Provider,
-				"requests":          m.TotalRequests,
-				"prompt_tokens":     m.PromptTokens,
-				"completion_tokens": m.CompletionToks,
-				"total_tokens":      m.TotalTokens,
-				"cache_read_tokens": 0,
-				"cache_write_tokens": 0,
-				"cost_usd":          m.TotalCostUSD,
+				"model":               m.Model,
+				"provider":            m.Provider,
+				"requests":            m.TotalRequests,
+				"prompt_tokens":       m.PromptTokens,
+				"completion_tokens":   m.CompletionToks,
+				"total_tokens":        m.TotalTokens,
+				"cache_read_tokens":   m.CacheReadToks,
+				"cache_write_tokens":  m.CacheWriteToks,
+				"cost_usd":            m.TotalCostUSD,
+				"price_missing_count": m.PriceMissing,
 			})
 		}
 
@@ -76,11 +351,11 @@ func DashboardRouter(database *db.Database) chi.Router {
 		projectRows := make([]map[string]interface{}, 0, len(byProject))
 		for _, p := range byProject {
 			projectRows = append(projectRows, map[string]interface{}{
-				"project_id":     p.ProjectID,
-				"requests":       p.TotalRequests,
-				"total_tokens":   p.TotalTokens,
-				"cost_usd":       p.TotalCostUSD,
-				"shadow_cost_usd": 0.0,
+				"project_id":      p.ProjectID,
+				"requests":        p.TotalRequests,
+				"total_tokens":    p.TotalTokens,
+				"cost_usd":        p.TotalCostUSD,
+				"shadow_cost_usd": p.ShadowCost,
 			})
 		}
 
@@ -110,22 +385,22 @@ func DashboardRouter(database *db.Database) chi.Router {
 		eventRows := make([]map[string]interface{}, 0, len(recentEvents))
 		for _, e := range recentEvents {
 			eventRows = append(eventRows, map[string]interface{}{
-				"id":                e.ID,
-				"timestamp":         e.Timestamp.Format(time.RFC3339Nano),
-				"provider":          e.Provider,
-				"model":             e.Model,
-				"client_app":        e.ClientApp,
-				"status_code":       e.StatusCode,
-				"prompt_tokens":     e.PromptTokens,
-				"total_tokens":      e.TotalTokens,
-				"completion_tokens": e.CompletionTokens,
-				"cache_read_tokens": e.CacheReadTokens,
+				"id":                 e.ID,
+				"timestamp":          e.Timestamp.Format(time.RFC3339Nano),
+				"provider":           e.Provider,
+				"model":              e.Model,
+				"client_app":         e.ClientApp,
+				"status_code":        e.StatusCode,
+				"prompt_tokens":      e.PromptTokens,
+				"total_tokens":       e.TotalTokens,
+				"completion_tokens":  e.CompletionTokens,
+				"cache_read_tokens":  e.CacheReadTokens,
 				"cache_write_tokens": e.CacheWriteTokens,
-				"cost_usd":          e.CostUSD,
-				"latency_ms":        e.LatencyMs,
-				"ttfb_ms":           e.TTFBMs,
-				"streaming_ms":      e.StreamingMs,
-				"tags":              e.Tags,
+				"cost_usd":           e.CostUSD,
+				"latency_ms":         e.LatencyMs,
+				"ttfb_ms":            e.TTFBMs,
+				"streaming_ms":       e.StreamingMs,
+				"tags":               e.Tags,
 			})
 		}
 
@@ -140,17 +415,23 @@ func DashboardRouter(database *db.Database) chi.Router {
 			})
 		}
 
-		// Normalize tps to match TpsSummary interface
-		tpsMap := map[string]interface{}{
-			"requests":           tps.TotalReqs,
-			"completion_tokens":  0,
-			"total_tokens":       0,
-			"total_latency_ms":   0.0,
-			"avg_latency_ms":     0.0,
-			"avg_tps":            tps.AvgTPS,
-			"peak_tps":           tps.PeakTPS,
+		// Throughput covers only rows whose timing was measured. Reporting
+		// completion tokens as total_tokens hid prompt and cache usage.
+		liveTPS, err := database.GetLiveTPS(10)
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "stats unavailable"})
+			return
 		}
-
+		tpsMap := map[string]interface{}{
+			"requests":          tps.TotalReqs,
+			"completion_tokens": tps.CompletionTokens,
+			"total_tokens":      tps.TotalTokens,
+			"total_latency_ms":  tps.AvgLatencyMs * float64(tps.TotalReqs),
+			"avg_latency_ms":    tps.AvgLatencyMs,
+			"avg_tps":           tps.AvgTPS,
+			"peak_tps":          tps.PeakTPS,
+			"live_tps":          liveTPS,
+		}
 		savings := map[string]float64{
 			"actual_usd": summary.TotalCostUSD,
 			"shadow_usd": summary.TotalShadowCost,
@@ -161,6 +442,7 @@ func DashboardRouter(database *db.Database) chi.Router {
 		sessionRows := make([]map[string]interface{}, 0, len(liveSessions))
 		for _, s := range liveSessions {
 			sessionRows = append(sessionRows, map[string]interface{}{
+				"run_id":        s.RunID,
 				"cli":           s.CLI,
 				"session_id":    s.SessionID,
 				"provider":      s.Provider,
@@ -170,35 +452,77 @@ func DashboardRouter(database *db.Database) chi.Router {
 				"cost_usd":      s.CostUSD,
 				"project":       s.Project,
 				"title":         "",
+				"started_at":    s.StartedAt,
 				"last_updated":  s.LastUpdated,
+				"elapsed_ms":    s.ElapsedMs,
 			})
 		}
 
 		writeJSON(w, http.StatusOK, map[string]interface{}{
-			"summary":        summaryMap,
-			"by_model":       modelRows,
-			"by_client":      clientRows,
-			"by_project":     projectRows,
-			"by_source":      sourceRows,
-			"by_tag":         tagRows,
-			"recent_events":  eventRows,
-			"live_sessions":  sessionRows,
-			"daily":          dailyRows,
-			"tps":            tpsMap,
-			"savings":        savings,
-			"guard": map[string]interface{}{
-				"limits": map[string]interface{}{
-					"daily_cost_limit_usd":   0.0,
-					"monthly_cost_limit_usd": 0.0,
-					"daily_tokens_limit":     0,
-					"monthly_tokens_limit":   0,
-					"action_on_breach":       "warn",
-				},
-				"status":  "ok",
-				"allowed": true,
-				"reason":  "",
-			},
+			"summary":       summaryMap,
+			"by_model":      modelRows,
+			"by_client":     clientRows,
+			"by_project":    projectRows,
+			"by_source":     sourceRows,
+			"by_tag":        tagRows,
+			"recent_events": eventRows,
+			"live_sessions": sessionRows,
+			"daily":         dailyRows,
+			"tps":           tpsMap,
+			"savings":       savings,
+			"guard":         budgetStatus(project),
 		})
+	})
+
+	r.Get("/stats.csv", func(w http.ResponseWriter, r *http.Request) {
+		since := resolveSince(r.URL.Query().Get("since"))
+		project := r.URL.Query().Get("project")
+		source := r.URL.Query().Get("source")
+		tag := r.URL.Query().Get("tag")
+		summary, err := database.GetSummary(since, project, source, tag)
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "stats unavailable"})
+			return
+		}
+		w.Header().Set("Content-Type", "text/csv; charset=utf-8")
+		w.Header().Set("Content-Disposition", `attachment; filename="odotoken-stats.csv"`)
+		csv := fmt.Sprintf("requests,total_tokens,prompt_tokens,completion_tokens,cost_usd,shadow_cost_usd,avg_latency_ms,avg_ttfb_ms\n%d,%d,%d,%d,%.8f,%.8f,%.2f,%.2f\n",
+			summary.TotalRequests, summary.TotalTokens, summary.PromptTokens,
+			summary.CompletionTokens, summary.TotalCostUSD, summary.TotalShadowCost,
+			summary.AvgLatencyMs, summary.AvgTTFBMs)
+		_, _ = w.Write([]byte(csv))
+	})
+
+	r.Get("/stats.svg", func(w http.ResponseWriter, r *http.Request) {
+		since := resolveSince(r.URL.Query().Get("since"))
+		project := r.URL.Query().Get("project")
+		source := r.URL.Query().Get("source")
+		tag := r.URL.Query().Get("tag")
+		summary, err := database.GetSummary(since, project, source, tag)
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "stats unavailable"})
+			return
+		}
+		w.Header().Set("Content-Type", "image/svg+xml; charset=utf-8")
+		w.Header().Set("Content-Disposition", `attachment; filename="odotoken-stats.svg"`)
+		svg := fmt.Sprintf(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 360" role="img" aria-label="odotoken usage snapshot">
+<rect width="800" height="360" fill="#ffffff"/>
+<text x="32" y="48" font-family="system-ui,sans-serif" font-size="24" font-weight="700" fill="#111827">odotoken usage snapshot</text>
+<text x="32" y="76" font-family="system-ui,sans-serif" font-size="12" fill="#6b7280">%s · %s · %s</text>
+<g font-family="system-ui,sans-serif" fill="#111827">
+<text x="32" y="130" font-size="13" fill="#6b7280">REQUESTS</text><text x="32" y="164" font-size="30" font-weight="700">%d</text>
+<text x="232" y="130" font-size="13" fill="#6b7280">TOTAL TOKENS</text><text x="232" y="164" font-size="30" font-weight="700">%d</text>
+<text x="432" y="130" font-size="13" fill="#6b7280">TOTAL SPENT</text><text x="432" y="164" font-size="30" font-weight="700">$%.2f</text>
+<text x="632" y="130" font-size="13" fill="#6b7280">AVG LATENCY</text><text x="632" y="164" font-size="30" font-weight="700">%.0fms</text>
+</g>
+<line x1="32" y1="206" x2="768" y2="206" stroke="#e5e7eb"/>
+<text x="32" y="244" font-family="system-ui,sans-serif" font-size="13" fill="#6b7280">Prompt <tspan font-weight="700" fill="#111827">%d</tspan> · Completion <tspan font-weight="700" fill="#111827">%d</tspan> · Cache read <tspan font-weight="700" fill="#111827">%d</tspan></text>
+<text x="32" y="276" font-family="system-ui,sans-serif" font-size="13" fill="#6b7280">Avg TTFT <tspan font-weight="700" fill="#111827">%.0fms</tspan> · Shadow cost <tspan font-weight="700" fill="#111827">$%.2f</tspan></text>
+</svg>`, escapeXML(sinceLabel(r.URL.Query().Get("since"))), escapeXML(project), escapeXML(source),
+			summary.TotalRequests, summary.TotalTokens, summary.TotalCostUSD, summary.AvgLatencyMs,
+			summary.PromptTokens, summary.CompletionTokens, summary.CacheReadTokens,
+			summary.AvgTTFBMs, summary.TotalShadowCost)
+		_, _ = w.Write([]byte(svg))
 	})
 
 	r.Get("/events", func(w http.ResponseWriter, r *http.Request) {
@@ -219,27 +543,27 @@ func DashboardRouter(database *db.Database) chi.Router {
 			}
 		}
 		events, _ := database.RecentEventsFiltered(limit, since, project, source, tag)
-		
+
 		// Normalize to match EventRow interface
 		eventRows := make([]map[string]interface{}, 0, len(events))
 		for _, e := range events {
 			eventRows = append(eventRows, map[string]interface{}{
-				"id":                e.ID,
-				"timestamp":         e.Timestamp.Format(time.RFC3339Nano),
-				"provider":          e.Provider,
-				"model":             e.Model,
-				"client_app":        e.ClientApp,
-				"status_code":       e.StatusCode,
-				"prompt_tokens":     e.PromptTokens,
-				"total_tokens":      e.TotalTokens,
-				"completion_tokens": e.CompletionTokens,
-				"cache_read_tokens": e.CacheReadTokens,
+				"id":                 e.ID,
+				"timestamp":          e.Timestamp.Format(time.RFC3339Nano),
+				"provider":           e.Provider,
+				"model":              e.Model,
+				"client_app":         e.ClientApp,
+				"status_code":        e.StatusCode,
+				"prompt_tokens":      e.PromptTokens,
+				"total_tokens":       e.TotalTokens,
+				"completion_tokens":  e.CompletionTokens,
+				"cache_read_tokens":  e.CacheReadTokens,
 				"cache_write_tokens": e.CacheWriteTokens,
-				"cost_usd":          e.CostUSD,
-				"latency_ms":        e.LatencyMs,
-				"ttfb_ms":           e.TTFBMs,
-				"streaming_ms":      e.StreamingMs,
-				"tags":              e.Tags,
+				"cost_usd":           e.CostUSD,
+				"latency_ms":         e.LatencyMs,
+				"ttfb_ms":            e.TTFBMs,
+				"streaming_ms":       e.StreamingMs,
+				"tags":               e.Tags,
 			})
 		}
 		writeJSON(w, http.StatusOK, eventRows)
@@ -255,38 +579,31 @@ func DashboardRouter(database *db.Database) chi.Router {
 		source := r.URL.Query().Get("source")
 		series, _ := database.GetTpsSeries(since, interval, project, source)
 		summary, _ := database.GetTpsSummary(since, project, source)
-		liveTPS := 0.0
-		for i := len(series) - 1; i >= 0; i-- {
-			if series[i].AvgTPS > 0 {
-				liveTPS = series[i].AvgTPS
-				break
-			}
-		}
+		liveTPS, _ := database.GetLiveTPS(10)
 
 		// Normalize series to match TpsBucket interface
 		seriesRows := make([]map[string]interface{}, 0, len(series))
 		for _, s := range series {
 			seriesRows = append(seriesRows, map[string]interface{}{
-				"bucket":           s.Timestamp,
-				"requests":         s.Requests,
-				"total_tokens":     s.Tokens,
-				"completion_tokens": 0,
-				"total_latency_ms": 0.0,
-				"avg_latency_ms":   0.0,
-				"avg_tps":          s.AvgTPS,
-				"peak_tps":         0.0,
+				"bucket":            s.Timestamp,
+				"requests":          s.Requests,
+				"total_tokens":      s.Tokens,
+				"completion_tokens": s.Tokens,
+				"total_latency_ms":  0.0,
+				"avg_latency_ms":    0.0,
+				"avg_tps":           s.AvgTPS,
+				"peak_tps":          s.PeakTPS,
 			})
 		}
 
-		// Normalize summary to match TpsSummary interface
 		summaryMap := map[string]interface{}{
-			"requests":           summary.TotalReqs,
-			"completion_tokens":  0,
-			"total_tokens":       0,
-			"total_latency_ms":   0.0,
-			"avg_latency_ms":     0.0,
-			"avg_tps":            summary.AvgTPS,
-			"peak_tps":           summary.PeakTPS,
+			"requests":          summary.TotalReqs,
+			"completion_tokens": summary.CompletionTokens,
+			"total_tokens":      summary.TotalTokens,
+			"total_latency_ms":  summary.AvgLatencyMs * float64(summary.TotalReqs),
+			"avg_latency_ms":    summary.AvgLatencyMs,
+			"avg_tps":           summary.AvgTPS,
+			"peak_tps":          summary.PeakTPS,
 		}
 
 		writeJSON(w, http.StatusOK, map[string]interface{}{
@@ -301,7 +618,8 @@ func DashboardRouter(database *db.Database) chi.Router {
 
 	r.Get("/forecast", func(w http.ResponseWriter, r *http.Request) {
 		tag := r.URL.Query().Get("tag")
-		daily, _ := database.GetDailyUsage(30, "", "")
+		tz := r.URL.Query().Get("tz")
+		daily, _ := database.GetDailyUsage(30, "", tag, tz)
 		costs := make([]float64, len(daily))
 		for i, d := range daily {
 			costs[i] = d.CostUSD
@@ -383,7 +701,6 @@ func DashboardRouter(database *db.Database) chi.Router {
 			})
 		}
 
-		_ = tag
 		writeJSON(w, http.StatusOK, map[string]interface{}{
 			"forecast":  forecast,
 			"anomalies": anomalies,
@@ -392,22 +709,29 @@ func DashboardRouter(database *db.Database) chi.Router {
 	})
 
 	r.Get("/sessions/live", func(w http.ResponseWriter, r *http.Request) {
-		sessions, _ := database.GetLiveSessions()
-		
+		sessions, err := database.GetLiveSessions()
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "live runs unavailable"})
+			return
+		}
+
 		// Normalize to match LiveSession interface
 		sessionRows := make([]map[string]interface{}, 0, len(sessions))
 		for _, s := range sessions {
 			sessionRows = append(sessionRows, map[string]interface{}{
-				"cli":          s.CLI,
-				"session_id":   s.SessionID,
-				"provider":     s.Provider,
-				"model":        s.Model,
-				"tokens_input": s.TokensInput,
+				"run_id":        s.RunID,
+				"cli":           s.CLI,
+				"session_id":    s.SessionID,
+				"provider":      s.Provider,
+				"model":         s.Model,
+				"tokens_input":  s.TokensInput,
 				"tokens_output": s.TokensOutput,
-				"cost_usd":     s.CostUSD,
-				"project":      s.Project,
-				"title":        "",
-				"last_updated": s.LastUpdated,
+				"cost_usd":      s.CostUSD,
+				"project":       s.Project,
+				"title":         "",
+				"started_at":    s.StartedAt,
+				"last_updated":  s.LastUpdated,
+				"elapsed_ms":    s.ElapsedMs,
 			})
 		}
 		writeJSON(w, http.StatusOK, sessionRows)
@@ -416,12 +740,50 @@ func DashboardRouter(database *db.Database) chi.Router {
 	return r
 }
 
+// persistGuardLimits updates only the guard block, preserving every other
+// config field. The temp file + rename keeps a concurrent restart from
+// observing a half-written config.
+func persistGuardLimits(path string, limits config.GuardConfig) error {
+	data, err := os.ReadFile(path)
+	if os.IsNotExist(err) {
+		data, err = os.ReadFile("config.json.example")
+	}
+	if err != nil {
+		return err
+	}
+	var root map[string]json.RawMessage
+	if err := json.Unmarshal(data, &root); err != nil {
+		return err
+	}
+	body, err := json.Marshal(limits)
+	if err != nil {
+		return err
+	}
+	root["guard"] = body
+	data, err = json.MarshalIndent(root, "", "  ")
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return err
+	}
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, append(data, '\n'), 0o600); err != nil {
+		return err
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		_ = os.Remove(tmp)
+		return err
+	}
+	return nil
+}
+
 func resolveSince(s string) string {
 	if s == "" || s == "all" {
 		return ""
 	}
 	now := time.Now().UTC()
-	
+
 	// Handle relative formats: "today", "7d", "30d"
 	if s == "today" {
 		return time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC).Format(time.RFC3339)
@@ -431,7 +793,7 @@ func resolveSince(s string) string {
 			return now.AddDate(0, 0, -days).Format(time.RFC3339)
 		}
 	}
-	
+
 	// Handle ISO8601 dates sent by frontend (e.g., "2026-10-16T00:00:00.000Z")
 	// Try parsing as time. If successful, re-format to RFC3339 (seconds precision)
 	// to ensure consistent comparison with SQLite timestamps which might lack sub-second precision.
@@ -441,7 +803,7 @@ func resolveSince(s string) string {
 	if t, err := time.Parse(time.RFC3339, s); err == nil {
 		return t.UTC().Format(time.RFC3339)
 	}
-	
+
 	// Fallback: return as-is (might be a valid SQLite date string)
 	return s
 }
@@ -454,5 +816,84 @@ func roundTo(val float64, places int) float64 {
 	return float64(int(val*mul+0.5)) / mul
 }
 
-// Ensure json is used.
-var _ = json.Marshal
+// decodeNumber decodes a JSON number or null. JSON null means the operator
+// cleared the field, and zero is the stored representation of an unlimited
+// guard limit.
+func decodeNumber[T float64 | int](raw json.RawMessage) (T, bool) {
+	var zero T
+	if string(raw) == "null" {
+		return zero, true
+	}
+	if err := json.Unmarshal(raw, &zero); err != nil {
+		return zero, false
+	}
+	return zero, true
+}
+
+// decodeLimitFloat decodes a number-or-null PATCH field, mapping a value below
+// one to an inactive limit.
+func decodeLimitFloat(raw json.RawMessage) (float64, bool) {
+	v, ok := decodeNumber[float64](raw)
+	if !ok {
+		return 0, false
+	}
+	if v <= 0 {
+		return 0, true
+	}
+	return v, true
+}
+
+// decodeLimitInt decodes an integer-or-null PATCH field, mapping a value below
+// one to an inactive limit.
+func decodeLimitInt(raw json.RawMessage) (int, bool) {
+	v, ok := decodeNumber[int](raw)
+	if !ok {
+		return 0, false
+	}
+	if v <= 0 {
+		return 0, true
+	}
+	return v, true
+}
+
+// decodeOptionalString decodes a string PATCH field; JSON null maps to the
+// caller's default action.
+func decodeOptionalString(raw json.RawMessage) (string, bool) {
+	if string(raw) == "null" {
+		return "", true
+	}
+	var value string
+	if err := json.Unmarshal(raw, &value); err != nil {
+		return "", false
+	}
+	return value, true
+}
+
+// escapeXML keeps user-supplied filter labels safe inside the snapshot SVG.
+func escapeXML(value string) string {
+	var b strings.Builder
+	for _, r := range value {
+		switch r {
+		case '&':
+			b.WriteString("&amp;")
+		case '<':
+			b.WriteString("&lt;")
+		case '>':
+			b.WriteString("&gt;")
+		case '"':
+			b.WriteString("&quot;")
+		case '\'':
+			b.WriteString("&apos;")
+		default:
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
+}
+
+func sinceLabel(raw string) string {
+	if raw == "" || raw == "all" {
+		return "all time"
+	}
+	return raw
+}

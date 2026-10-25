@@ -1,6 +1,7 @@
 package server
 
 import (
+	"crypto/subtle"
 	"log/slog"
 	"net/http"
 	"os"
@@ -31,6 +32,12 @@ type Server struct {
 
 // New wires all components together.
 func New(database *db.Database, cfg config.Config, logger *slog.Logger) *Server {
+	return NewWithConfigPath(database, cfg, logger, "config.json")
+}
+
+// NewWithConfigPath builds the server and lets the guard API persist changes
+// to the exact config file this daemon loaded.
+func NewWithConfigPath(database *db.Database, cfg config.Config, logger *slog.Logger, configPath string) *Server {
 	calc := pricing.NewCalculator("prices.json")
 	g := guard.New(database, cfg.Guard, cfg.Alerts, logger)
 	p := proxy.New(database, calc, cfg, logger)
@@ -41,13 +48,18 @@ func New(database *db.Database, cfg config.Config, logger *slog.Logger) *Server 
 	r.Use(middleware.RequestID)
 	r.Use(middleware.RealIP)
 	r.Use(middleware.Logger)
+	// CORS: only origins explicitly allowlisted in config get headers. Empty
+	// allowlist means no cross-origin access at all (the SPA is same-origin).
 	r.Use(func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			w.Header().Set("Access-Control-Allow-Origin", "*")
-			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
-			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Odo-Project, X-Odo-Tags")
+			if origin := r.Header.Get("Origin"); origin != "" && originAllowed(origin, cfg.Server.CORSAllowlist) {
+				w.Header().Set("Access-Control-Allow-Origin", origin)
+				w.Header().Set("Vary", "Origin")
+				w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+				w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Api-Key, X-Odo-Project, X-Odo-Session, X-Odo-Tags")
+			}
 			if r.Method == "OPTIONS" {
-				w.WriteHeader(http.StatusOK)
+				w.WriteHeader(http.StatusNoContent)
 				return
 			}
 			next.ServeHTTP(w, r)
@@ -64,13 +76,22 @@ func New(database *db.Database, cfg config.Config, logger *slog.Logger) *Server 
 		})
 	})
 
+	// API auth: when server.api_key is set, /api and /v1 require it. The proxy
+	// catch-all is exempt — it forwards the caller's own provider credentials.
+	authed := func(h http.Handler) http.Handler {
+		if cfg.Server.APIKey == "" {
+			return h
+		}
+		return requireAPIKey(cfg.Server.APIKey, h)
+	}
+
 	// API routes
-	r.Mount("/v1", api.Router(cfg, calc))
-	r.Mount("/api", api.DashboardRouter(database))
+	r.Mount("/v1", authed(api.Router(cfg, calc)))
+	r.Mount("/api", authed(api.DashboardRouter(database, g.Check, g.Limits, g.UpdateLimits, configPath)))
 
 	// Favicon — serve from disk
 	r.Get("/favicon.ico", func(w http.ResponseWriter, r *http.Request) {
-		data, err := os.ReadFile("src/odotoken/static/favicon.svg")
+		data, err := os.ReadFile("internal/server/static/favicon.svg")
 		if err != nil {
 			http.NotFound(w, r)
 			return
@@ -86,7 +107,7 @@ func New(database *db.Database, cfg config.Config, logger *slog.Logger) *Server 
 
 	// SPA: /app and /app/* serve index.html or static assets from disk
 	// This allows live reload during development without rebuilding the Go binary
-	staticDir := "src/odotoken/static"
+	staticDir := "internal/server/static"
 
 	r.Get("/app", func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/app/", http.StatusTemporaryRedirect)
@@ -145,6 +166,34 @@ func New(database *db.Database, cfg config.Config, logger *slog.Logger) *Server 
 		Router:  r,
 		Logger:  logger,
 	}
+}
+
+// originAllowed reports whether origin is in the explicit allowlist.
+func originAllowed(origin string, allowlist []string) bool {
+	for _, a := range allowlist {
+		if a == "*" || strings.EqualFold(a, origin) {
+			return true
+		}
+	}
+	return false
+}
+
+// requireAPIKey gates h behind a shared key accepted from either the
+// Authorization: Bearer header or X-Api-Key. Compared in constant time.
+func requireAPIKey(key string, h http.Handler) http.Handler {
+	want := []byte(key)
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got := r.Header.Get("X-Api-Key")
+		if got == "" {
+			got = strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
+		}
+		if subtle.ConstantTimeCompare([]byte(got), want) != 1 {
+			w.Header().Set("WWW-Authenticate", `Bearer realm="odotoken"`)
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		h.ServeHTTP(w, r)
+	})
 }
 
 func guessContentType(name string) string {
