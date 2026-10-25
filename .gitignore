@@ -1,25 +1,10 @@
-# Python-generated files
-__pycache__/
-*.py[oc]
-build/
-dist/
-wheels/
-*.egg-info
-
-# Virtual environments
-.venv
-venv/
-env/
-
-# Testing
-.pytest_cache/
-.coverage
-htmlcov/
-coverage.xml
-
 # Databases (local data)
 *.db
 *.sqlite3
+
+# SQLite runtime sidecars
+*.db-shm
+*.db-wal
 
 # IDE
 .idea/
@@ -35,19 +20,8 @@ Thumbs.db
 .env
 .env.*
 
-# Packaging
-*.egg
-pip-log.txt
-
-# Type checking
-.mypy_cache/
-.ruff_cache/
-
 # Local plans (untracked working notes)
 PLAN*.md
-# SQLite runtime sidecars
-*.db-shm
-*.db-wal
 
 # Local config (track config.json.example as template; user copies to config.json)
 config.json
@@ -56,7 +30,3 @@ config.json
 # Compiled binaries (Go build output)
 odotoken
 bin/
-
-# Local dev launcher
-start_fresh.py
-
