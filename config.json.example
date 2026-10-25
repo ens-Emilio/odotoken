@@ -1,142 +1,52 @@
 {
+  "server": {
+    "bind_host": "127.0.0.1",
+    "api_key": "change-me-or-use-ODO_API_KEY",
+    "cors_allowlist": ["http://localhost:5173"]
+  },
   "proxy": {
     "host": "127.0.0.1",
     "port": 8090,
-    "upstream_openai": "http://127.0.0.1:8791",
-    "upstream_anthropic": "http://127.0.0.1:8082",
+    "upstream_openai": "https://api.openai.com",
+    "upstream_anthropic": "https://api.anthropic.com",
     "upstream_gemini": "https://generativelanguage.googleapis.com",
     "upstream_ollama": "http://127.0.0.1:11434"
   },
   "providers": {
-    "anthropic": {
-      "upstream_url": "http://127.0.0.1:8082"
-    },
-    "openai": {
-      "upstream_url": "http://127.0.0.1:8791"
-    },
-    "gemini": {
-      "upstream_url": "https://generativelanguage.googleapis.com"
-    },
-    "ollama": {
-      "upstream_url": "http://127.0.0.1:11434"
-    },
-    "kodeo": {
-      "upstream_url": "https://api.kodeo.com.br/v1"
-    },
-    "kodeo-cc": {
-      "upstream_url": "https://api.kodeo.com.br/v1"
-    },
-    "verboo": {
-      "upstream_url": "https://code.verboo.ai/router/v1"
-    },
-    "cheapestinference": {
-      "upstream_url": "https://api.cheapestinference.com/v1"
-    },
-    "useoneai": {
-      "upstream_url": "https://api.useoneai.app/v1"
-    },
-    "pegasus": {
-      "upstream_url": "https://api.pegasusrelay.com/v1"
-    }
+    "openai": { "upstream_url": "https://api.openai.com" },
+    "anthropic": { "upstream_url": "https://api.anthropic.com" },
+    "gemini": { "upstream_url": "https://generativelanguage.googleapis.com" },
+    "ollama": { "upstream_url": "http://127.0.0.1:11434" },
+    "kodeo": { "upstream_url": "https://api.kodeo.com.br/v1" },
+    "verboo": { "upstream_url": "https://code.verboo.ai/router/v1" },
+    "pegasus": { "upstream_url": "https://api.pegasusrelay.com/v1" },
+    "ghostcli": { "upstream_url": "https://ghostcli.cloud/v1" }
+  },
+  "guard": {
+    "daily_cost_limit_usd": 0,
+    "monthly_cost_limit_usd": 0,
+    "daily_tokens_limit": 0,
+    "monthly_tokens_limit": 0,
+    "warning_threshold_pct": 80,
+    "action_on_breach": "block",
+    "timezone": "UTC"
   },
   "limits": {
-    "daily_cost_limit_usd": 10.0,
-    "monthly_cost_limit_usd": 100.0,
-    "daily_tokens_limit": 50000,
-    "monthly_tokens_limit": 500000,
-    "action_on_breach": "alert",
-    "projects": {
-      "my-app": {
-        "daily_cost_limit_usd": 5.0,
-        "monthly_cost_limit_usd": 50.0,
-        "daily_tokens_limit": 20000,
-        "action_on_breach": "block"
-      },
-      "experiment": {
-        "daily_cost_limit_usd": 2.0,
-        "action_on_breach": "alert"
-      }
-    },
-    "rate_limit": {
-      "requests_per_min": 0,
-      "tokens_per_min": 0
-    },
-    "alerts": {
-      "slack_url": "",
-      "discord_url": "",
-      "telegram": {
-        "bot_token_env": "ODO_TELEGRAM_TOKEN",
-        "chat_id": ""
-      },
-      "email": {
-        "smtp_host": "",
-        "port": 587,
-        "to": "",
-        "user_env": "ODO_SMTP_USER",
-        "pass_env": "ODO_SMTP_PASS"
-      }
-    }
+    "rate_limit": { "enabled": false, "rps": 0, "burst_size": 0 }
   },
-  "cache": {
-    "semantic": {
-      "enabled": false,
-      "ttl_seconds": 3600
-    }
-  },
-  "auth": {
-    "bearer_token_env": "ODO_DASH_TOKEN",
-    "basic": {
-      "user": "",
-      "pass_env": "ODO_DASH_PASS"
-    }
-  },
-  "otel": {
-    "enabled": false,
-    "endpoint": "http://127.0.0.1:4317"
-  },
-  "database": {
+  "alerts": {
+    "slack_url": "",
+    "discord_url": "",
+    "telegram": { "bot_token_env": "ODO_TELEGRAM_TOKEN", "chat_id": "" },
+    "email": { "smtp_host": "", "smtp_port": 587, "username": "", "password": "", "from_addr": "", "to_addr": "" }
   },
   "token_counter": {
     "enabled": true,
-    "default_model": "gpt-4o-mini",
-    "default_provider": "openai",
-    "cache_enabled": true,
-    "cache_ttl_seconds": 3600,
-    "cache_max_size": 10000,
+    "heuristic": { "chars_per_token": 4.0, "words_per_token": 0.75 },
     "providers": {
-      "openai": {
-        "enabled": false,
-        "api_key_env": "OPENAI_API_KEY",
-        "base_url": "http://127.0.0.1:8791",
-        "count_endpoint": "/v1/tokens/count"
-      },
-      "anthropic": {
-        "enabled": false,
-        "api_key_env": "ANTHROPIC_API_KEY",
-        "base_url": "http://127.0.0.1:8082",
-        "count_endpoint": "/v1/messages/count_tokens"
-      },
-      "gemini": {
-        "enabled": false,
-        "api_key_env": "GEMINI_API_KEY",
-        "base_url": "https://generativelanguage.googleapis.com",
-        "count_endpoint": "/v1/models/{model}:countTokens"
-      },
-      "ollama": {
-        "enabled": false,
-        "base_url": "http://127.0.0.1:11434"
-      }
-    },
-    "heuristic": {
-      "chars_per_token": 4.0,
-      "words_per_token": 0.75
+      "openai": { "enabled": false, "api_key_env": "OPENAI_API_KEY", "base_url": "https://api.openai.com", "count_endpoint": "/v1/tokens/count" },
+      "anthropic": { "enabled": false, "api_key_env": "ANTHROPIC_API_KEY", "base_url": "https://api.anthropic.com", "count_endpoint": "/v1/messages/count_tokens" }
     }
-  },
-  "privacy": {
-    "redact_logs": true,
-    "store_prompts": false,
-    "block_mode": false,
-    "custom_patterns": []
   },
   "sessions": {
     "enabled": true,
@@ -146,5 +56,7 @@
       "omp": "~/.omp/stats.db",
       "crush": "~/.local/share/crush/projects.json"
     }
-  }
+  },
+  "cache": { "semantic": { "enabled": false, "ttl": 3600 } },
+  "database": { "path": "odotoken.db" }
 }

@@ -53,9 +53,8 @@ O uso de tokens é extraído tanto de respostas JSON quanto de streams SSE (incl
 git clone https://github.com/ens-Emilio/odotoken.git
 cd odotoken
 
-# backend
-python -m venv .venv
-.venv/bin/pip install -e .
+# backend (Go 1.26+)
+go build -o bin/odotoken ./cmd/odotoken
 
 # frontend (opcional, o dashboard vem pré-compilado nos releases)
 cd frontend && pnpm install && pnpm build && cd ..
@@ -84,9 +83,13 @@ cp config.json.example config.json  # edite upstreams / limits / sessions
     "openai": { "upstream_url": "https://api.openai.com" },
     "meurouter": { "upstream_url": "https://meu-router.exemplo/v1" }
   },
-  "limits": {
-    "monthly_budget_usd": 50.0,
-    "block_on_budget_exceeded": false
+  "guard": {
+    "daily_cost_limit_usd": 10,
+    "monthly_cost_limit_usd": 100,
+    "daily_tokens_limit": 50000,
+    "monthly_tokens_limit": 500000,
+    "warning_threshold_pct": 80,
+    "action_on_breach": "block"
   },
   "database": { "path": "odotoken.db" }
 }
@@ -142,6 +145,10 @@ Endpoints do proxy (mesma porta do dashboard):
 ```bash
 curl http://127.0.0.1:8090/health
 curl http://127.0.0.1:8090/api/stats?since=2026-10-01T00:00:00
+curl http://127.0.0.1:8090/api/guard/status
+curl http://127.0.0.1:8090/api/filters
+curl http://127.0.0.1:8090/api/stats.csv
+curl http://127.0.0.1:8090/api/stats.svg
 ```
 
 API de contagem de tokens (`odotoken serve`, porta 8081):
@@ -210,9 +217,11 @@ odotoken sessions stats --by-cli --by-model   # breakdown por origem
 | `proxy.host` / `proxy.port` | endereço de bind | `127.0.0.1:8090` |
 | `providers.<chave>.upstream_url` | upstream da rota por prefixo | — |
 | `proxy.upstream_openai` / `upstream_anthropic` | upstreams de fallback para requisições detectadas automaticamente | APIs oficiais |
-| `limits.daily_cost_limit_usd` / `limits.monthly_cost_limit_usd` | limites diário/mensal de custo (0 = desativado) | `null` |
-| `limits.daily_tokens_limit` / `limits.monthly_tokens_limit` | limites diário/mensal de tokens (0 = desativado) | `null` |
-| `limits.action_on_breach` | `alert` ou `block` (429) | `alert` |
+| `guard.daily_cost_limit_usd` / `guard.monthly_cost_limit_usd` | limites diário/mensal de custo (0 = desativado) | `null` |
+| `guard.daily_tokens_limit` / `guard.monthly_tokens_limit` | limites diário/mensal de tokens (0 = desativado) | `null` |
+| `guard.warning_threshold_pct` | percentual em que a guarda passa de ok para warning | `80` |
+| `guard.action_on_breach` | `alert` continua atendendo e dispara alertas; `block` rejeita requisições estouradas com HTTP 429 | `block` |
+| `guard.timezone` | fuso IANA usado nos limites diário e mensal | UTC |
 | `limits.webhook_url` | webhook notificado em `warning`/`breached` | `null` |
 | `database.path` | arquivo SQLite (modo WAL) | `odotoken.db` |
 | `token_counter.enabled` | middleware de contagem pré-flight no proxy | `true` |
@@ -220,8 +229,9 @@ odotoken sessions stats --by-cli --by-model   # breakdown por origem
 ## Tags de projeto, shadow pricing e privacidade
 
 - **Tags de projeto** — envie `X-Odo-Project: <nome>` (ou `X-Project`) em qualquer requisição; custos segmentados por projeto no dashboard, `/api/stats?project=<id>` e `odotoken stats --by-project`.
-- **Shadow pricing** — modelos locais (preço zero) ganham um `shadow_cost` calculado no modelo `cloud_equivalent` configurado; o dashboard mostra o KPI "Saved vs Cloud" quando há economia.
-- **Privacidade** — logs passam por um redator de PII (chaves, tokens, emails, CPF/CNPJ, paths home; estenda via `privacy.custom_patterns`). `privacy.store_prompts` (padrão **false**) permite armazenar apenas hash SHA-256 + preview de 200 chars redigido por evento.
+- **Runs live** — `GET /api/sessions/live` lista requests de modelo em andamento. Envie `X-Odo-Session: <conversation-id>` para agrupar chamadas concorrentes da mesma conversa; cada request mantém seu próprio `run_id`.
+- **Shadow pricing** — modelos locais (preço zero) ganham um `shadow_cost` calculado a partir do equivalente cloud escolhido por `getCloudEquivalent` (`internal/pricing/calculator.go`); o dashboard mostra o KPI "Saved vs Cloud" quando há economia.
+- **Privacidade** — o odotoken armazena metadados de uso, não o conteúdo de prompts ou respostas. As mensagens importadas nunca são processadas: o proxy registra tokens, tempos, modelo, projeto e tags. Não há redator de PII no momento; não trate o banco como anonimizado.
 - **Prometheus** — `GET /metrics` na porta do proxy serve métricas em text format; importe `examples/grafana-dashboard.json` ou rode `docker compose -f examples/docker-compose.observability.yml up -d`.
 - **Mock & caos** — defina o upstream de um provider como `mock://local` para respostas sintéticas (sem rede, com metering). Ative `chaos: {enabled: true, rate: 0.05, errors: [429,500], latency_ms: 3000}` para testar resiliência do cliente; `X-Odo-No-Chaos: true` desvia.
 
@@ -254,9 +264,9 @@ journalctl --user -u odotoken -n 50 --no-pager
 
 ## Desenvolvimento
 
-.venv/bin/pip install -e ".[dev]" 2>/dev/null || .venv/bin/pip install -e . pytest pytest-asyncio
-.venv/bin/pytest                          # 125 testes (unit, integração, CLI, golden)
-cd frontend && pnpm install && pnpm build  # compila o dashboard → src/odotoken/static/
+make build                                 # compila ./cmd/odotoken → bin/odotoken
+make test                                  # go test -race ./...
+cd frontend && pnpm install && pnpm build   # compila o dashboard → internal/server/static/
 ```
 
 ## Licença

@@ -34,18 +34,15 @@ Token usage is extracted from both regular JSON responses and SSE streams (inclu
 
 ## Features
 
-- **Transparent metering** — no changes to how your CLIs work, just point them at the proxy
-- **Real pricing** — 2,700+ models with per-1M-token rates from a public pricing API and local router configs
-- **Budget guard** — daily/monthly cost & token limits with alert or hard block (HTTP 429)
-- **React dashboard** — live KPIs, charts, sortable tables, event stream with per-request detail dialog, light/dark/system themes
-- **CLI** — terminal stats (`odotoken stats --by-model`), recent log, service management
-- **Token counting API** — optional standalone service for pre-flight counts (heuristic + remote provider APIs)
-- **Model catalog** — aliases, context windows, per-model counting strategies
-- **Cache with TTL** — versioned, invalidated on catalog/tokenizer changes
-- **Throughput metrics** — TPS/TTFT per model, project and interval (`GET /api/tps`, `odotoken stats --tps`, Throughput view)
-- **Replay & optimize** — re-price historical events with current prices (`odotoken replay`) and get cheaper-model recommendations (`odotoken optimize`)
-- **Tags & forecast** — `X-Odo-Tags` segmentation and linear cost forecast + anomaly detection on Overview
-- **Alerts & export** — Slack/Discord/Telegram/SMTP alerts on budget breach, per-project limits, CSV export (`GET /api/export?format=csv`)
+- **Transparent metering** — point CLIs at the local proxy; requests and response streams pass through unchanged
+- **Pricing** — model prices from `prices.json`, plus shadow pricing for local models
+- **Budget guard** — daily/monthly cost and token limits with alerts
+- **Dashboard** — KPIs, charts, sortable tables, event stream, timezone selection, light/dark themes
+- **CLI** — service management plus terminal stats and session import
+- **Token counting API** — `/v1/count`, `/v1/count/batch`, and `/v1/models`
+- **Throughput metrics** — measured output tokens per generation second, with a 10-second live window
+- **Tags and forecast** — `X-Odo-Tags` segmentation and a linear cost forecast with anomaly detection
+- **Alerts** — Slack, Discord, Telegram, and SMTP on warning/breach transitions
 
 ## Installation
 
@@ -53,9 +50,8 @@ Token usage is extracted from both regular JSON responses and SSE streams (inclu
 git clone https://github.com/ens-Emilio/odotoken.git
 cd odotoken
 
-# backend
-python -m venv .venv
-.venv/bin/pip install -e .
+# backend (Go 1.26+)
+go build -o bin/odotoken ./cmd/odotoken
 
 # frontend (optional, dashboard ships pre-built in releases)
 cd frontend && pnpm install && pnpm build && cd ..
@@ -63,103 +59,82 @@ cd frontend && pnpm install && pnpm build && cd ..
 
 ## Quick start
 
-### 1. Configuration
-
 ```bash
-cp config.json.example config.json  # edit upstreams / limits / sessions
+cp config.json.example config.json
+bin/odotoken start --host 127.0.0.1 --port 8090
 ```
-Minimal `config.json`:
-```jsonc
+
+Open **http://127.0.0.1:8090/app/**. Point each CLI's provider base URL at the
+proxy and keep its API key in the client. A provider-prefixed route such as
+`/<provider>/...` selects `providers.<provider>.upstream_url`.
+
+Typical `config.json`:
+
+```json
 {
-  "proxy": {
-    "host": "127.0.0.1",
-    "port": 8090,
-    "upstream_openai": "https://api.openai.com",
-    "upstream_anthropic": "https://api.anthropic.com"
+  "server": {
+    "bind_host": "127.0.0.1",
+    "api_key": "change-me",
+    "cors_allowlist": ["http://localhost:5173"]
   },
   "providers": {
-    // path-prefix routes: /<key>/... → upstream_url
-    "anthropic": { "upstream_url": "https://api.anthropic.com" },
     "openai": { "upstream_url": "https://api.openai.com" },
-    "myrouter": { "upstream_url": "https://my-router.example/v1" }
+    "anthropic": { "upstream_url": "https://api.anthropic.com" }
   },
-  "limits": {
-    "monthly_budget_usd": 50.0,
-    "block_on_budget_exceeded": false
-  },
-  "database": { "path": "odotoken.db" }
+  "guard": {
+    "daily_cost_limit_usd": 10,
+    "monthly_cost_limit_usd": 100,
+    "daily_tokens_limit": 50000,
+    "monthly_tokens_limit": 500000,
+    "warning_threshold_pct": 80,
+    "action_on_breach": "block"
+  }
 }
 ```
 
-API keys are **never stored** in the config — your CLIs send their own `Authorization`/`x-api-key` headers and the proxy forwards them untouched.
-
-### 2. Point your CLI agents at the proxy
-
-| CLI | How |
-|-----|-----|
-| Claude Code | `~/.claude/settings.json` → `"env": {"ANTHROPIC_BASE_URL": "http://127.0.0.1:8090"}` |
-| crush | provider `--base-url "http://127.0.0.1:8090/openai/v1"` |
-| opencode | provider `baseURL: "http://127.0.0.1:8090/<provider-key>"` |
-| Anything else | set its base URL to the proxy; use a `/provider-key/` prefix for multi-provider setups |
-
-Restart the CLI after changing its config (configs load at startup).
-
-### 3. Run it
-
-```bash
-odotoken start              # proxy + dashboard
-# or as a systemd user service (generates the unit with correct absolute paths):
-odotoken install-service
-systemctl --user daemon-reload
-systemctl --user enable --now odotoken
-```
-
-Open **http://127.0.0.1:8090/dashboard** — usage appears within 10 seconds.
+`server.api_key` also resolves from `ODO_API_KEY`. In that mode, send
+`Authorization: Bearer <key>` or `X-Api-Key: <key>` to `/api/*` and `/v1/*`.
+The proxy continues forwarding each client's own provider credentials.
 
 ## CLI reference
 
 ```bash
-odotoken start [--host] [--port] [--reload]   # start proxy + dashboard
-odotoken serve [--port 8081]                  # standalone token counter API
-odotoken status                               # check service/port
+odotoken start [--host HOST] [--port PORT] [--config FILE] [--db FILE]
+odotoken stop
+odotoken status
 odotoken stats [--by-model] [--by-client] [--since ISO-DATE] [--days N]
-odotoken log [--limit 20]                     # recent request log
-odotoken count text "hello" [--model X] [--output json]
-odotoken count chat --file messages.json      # JSON array of messages
-odotoken count batch requests.jsonl
-odotoken models list [--provider X]
-odotoken models info <model-id>
-odotoken sessions scan [--since ISO-DATE]     # read-only: what CLIs exist here
-odotoken sessions import [--dry-run] [--cli omp|claude|codex|crush] [--since ISO-DATE]
-odotoken sessions stats [--since ISO-DATE] [--by-cli] [--by-model] [--by-project]
-odotoken stats --tps [--since ISO-DATE]       # throughput (TPS/TTFT) breakdown
-odotoken replay [--since ISO-DATE] [--apply]  # re-price history with current prices
-odotoken optimize [--since ISO-DATE] [--project ID]  # cheaper-model suggestions
+odotoken import [omp|claude|codex|crush|opencode|pi] [--since ISO-DATE]
 ```
 
 ## HTTP API
 
-Proxy endpoints (same port as the dashboard):
-
 ```bash
-curl http://127.0.0.1:8090/health
-curl http://127.0.0.1:8090/api/stats?since=2026-10-01T00:00:00
-curl "http://127.0.0.1:8090/api/stats?tag=prod&project=web"   # filters: tag / project / source
-curl http://127.0.0.1:8090/api/tps?interval=1h               # throughput series + summary
-curl http://127.0.0.1:8090/api/forecast                      # cost forecast + anomalies
-curl "http://127.0.0.1:8090/api/export?format=csv"           # CSV export of events
+curl http://127.0.0.1:8090/v1/health
+curl http://127.0.0.1:8090/api/stats
+curl "http://127.0.0.1:8090/api/stats?tag=prod&project=web"
+curl http://127.0.0.1:8090/api/tps?interval=1h
+curl http://127.0.0.1:8090/api/forecast
+curl http://127.0.0.1:8090/api/events?limit=50
+curl http://127.0.0.1:8090/api/guard/status
+curl http://127.0.0.1:8090/api/filters
+curl http://127.0.0.1:8090/api/stats.csv
+curl http://127.0.0.1:8090/api/stats.svg
 ```
 
-Token counter API (`odotoken serve`, port 8081):
+When `server.api_key` or `ODO_API_KEY` is set, `/api/*` and `/v1/*` require
+`Authorization: Bearer <key>` or `X-Api-Key: <key>`.
+
+## Token counting API
+
+The `odotoken` daemon exposes token counting on the same port as the proxy and
+dashboard:
 
 ```bash
-curl -X POST http://127.0.0.1:8081/v1/count \
+curl -X POST http://127.0.0.1:8090/v1/count \
   -H "Content-Type: application/json" \
   -d '{"model": "gpt-4o-mini", "text": "Hello world"}'
 
-curl -X POST http://127.0.0.1:8081/v1/count/batch -d '{"items": [...]}'
-curl http://127.0.0.1:8081/v1/models
-curl http://127.0.0.1:8081/health      # + /ready, /metrics
+curl http://127.0.0.1:8090/v1/models
 ```
 
 ## Model pricing
@@ -188,15 +163,12 @@ The public pricing API needs no auth key for reads (rate limited: 10 req/s per I
 
 ## Importing local CLI sessions
 
-Use odotoken to read the sessions already on this machine (no proxy needed) and price them with `prices.json`:
+Import session history already on this machine (no proxy needed):
 
 ```bash
-odotoken sessions scan                          # what CLIs/files were found (read-only)
-odotoken sessions import --dry-run              # count tokens + cost without writing
-odotoken sessions import                        # import into SQLite (idempotent, deduped)
-odotoken sessions import --since 2026-10-01     # incremental
-odotoken sessions import --cli omp              # single importer
-odotoken sessions stats --by-cli --by-model     # breakdown by source
+odotoken import                         # import every detected source
+odotoken import omp --since 2026-10-01  # one source, incrementally
+odotoken stats --by-model               # inspect imported usage
 ```
 
 Supported CLIs (auto-detected, missing ones are silently skipped):
@@ -220,8 +192,8 @@ Supported CLIs (auto-detected, missing ones are silently skipped):
 | **Codex `workdir` vs `cwd` drift** — history file stores `workdir` but session stores `cwd` | `project` prefers `cwd` → fallback `workdir` → `"default"`; never fails the turn | normalize project names server-side via `X-Odo-Project` where possible |
 | **Stale `--since` (client clock skew / TOML date parsing)** | `since` is string-compared as ISO-8601 UTC; if unparsable, filter is ignored and all rows re-checked by `UNIQUE` dedup | pass explicit `--since 2026-10-01T00:00:00Z` |
 | **Large sessions (50k+ lines) streamed on import** | read line-by-line with `JSONDecodeError` skip per line; corrupt lines logged and skipped | never load the whole file into memory; interrupt mid-import is safe (transaction per chunk) |
-| **God model via env prefix** — same underlying model under `kube`/`pegasus`/`kodeo-*` keys | priced by resolved `model` id, not golem URL prefix; `shadow_cost` follows `catalog.cloud_equivalent` | add `cloud_equivalent` in `src/odotoken/catalog/models.json` when provisioning a new golem |
-| **Privacy + PII in imported messages** | importer only reads token counts + model identifiers; never `content`/`tool_calls` | set `privacy.redact_logs=false` only on trusted local DBs |
+| **God model via env prefix** — same underlying model under `kube`/`pegasus`/`kodeo-*` keys | priced by resolved `model` id, not upstream URL prefix; `shadow_cost` follows `getCloudEquivalent` in `internal/pricing/calculator.go` | extend `getCloudEquivalent` when provisioning a new local model family |
+| **Privacy + PII in imported messages** | importer only reads token counts and model identifiers; it never reads `content` or `tool_calls`, and no PII redactor runs over session messages | keep imported databases local; odotoken does not claim PII scrubbing |
 
 Details:
 - **One pricing source** — every imported row is re-priced with `PricingCalculator` (`prices.json`); original `cost_total` is kept in `metadata`.
@@ -236,35 +208,28 @@ Details:
 | `proxy.host` / `proxy.port` | bind address | `127.0.0.1:8090` |
 | `providers.<key>.upstream_url` | path-prefix route upstream | — |
 | `proxy.upstream_openai` / `upstream_anthropic` | fallback upstreams for auto-detected requests | official APIs |
-| `limits.daily_cost_limit_usd` / `limits.monthly_cost_limit_usd` | daily/monthly cost limits (0 = disabled) | `null` |
-| `limits.daily_tokens_limit` / `limits.monthly_tokens_limit` | daily/monthly token limits (0 = disabled) | `null` |
-| `limits.action_on_breach` | `alert` or `block` (429) | `alert` |
-| `limits.webhook_url` | webhook notified on `warning`/`breached` | `null` |
-| `database.path` | SQLite file (WAL mode) | `odotoken.db` |
-| `token_counter.enabled` | pre-flight counting middleware on the proxy | `true` |
-| `sessions.enabled` / `sessions.paths` | local CLI session import (claude/codex/omp/crush) | `true` / `~/.claude/...` |
-| `limits.projects.<id>` | per-project cost/token caps (same keys as global `limits.*`) | — |
-| `limits.alerts` | alert channels: `slack_url`, `discord_url`, `telegram: {bot_token_env\|bot_token, chat_id}`, `email: {smtp_host, port, to, user_env, pass_env}` | — |
-| `limits.rate_limit` | token bucket per project: `requests_per_min` or `tokens_per_min` (0 = disabled) | disabled |
-| `auth.bearer_token` / `auth.bearer_token_env` / `auth.basic.{user,pass,pass_env}` | dashboard + API auth | disabled |
-| `cache.semantic` | prompt-hash response cache: `enabled`, `ttl_seconds` | disabled |
-| `privacy.block_mode` | reject requests whose body contains PII (HTTP 400 `pii_detected`) | `false` |
-| `providers.<key>.upstream_urls` / `.fallback_url` / `.fallbacks` | round-robin primaries + failover (connection error, non-auth 4xx, 5xx) | — |
-| `otel.enabled` / `otel.endpoint` (or `OTEL_EXPORTER_OTLP_ENDPOINT`) | OpenTelemetry tracing of proxy requests | disabled |
+| `guard.daily_cost_limit_usd` / `guard.monthly_cost_limit_usd` | daily/monthly cost limits (0 = disabled) | `null` |
+| `guard.daily_tokens_limit` / `guard.monthly_tokens_limit` | daily/monthly token limits (0 = disabled) | `null` |
+| `guard.warning_threshold_pct` | percentage at which the guard moves from ok to warning | `80` |
+| `guard.action_on_breach` | `alert` keeps serving requests while emitting alerts; `block` rejects breached requests with HTTP 429 | `block` |
+| `guard.timezone` | IANA zone used for daily and monthly budget boundaries | UTC |
+| `limits.rate_limit.enabled` / `rps` / `burst_size` | global proxy token bucket (0 = disabled) | disabled |
+| `alerts.slack_url` / `discord_url` / `telegram` / `email` | alert channels used on warning/breached transitions | disabled |
+| `server.bind_host` | host the daemon binds to | `127.0.0.1` |
+| `server.api_key` or `ODO_API_KEY` | Bearer / `X-Api-Key` required on `/api/*` and `/v1/*` | disabled |
+| `server.cors_allowlist` | exact origins allowed to read the API cross-origin | empty |
+- **Alerts** — on a warning or breach transition, odotoken posts to the configured Slack, Discord, Telegram, and SMTP channels. Repeated polls in the same state do not send another alert.
+- **Rate limit** — `limits.rate_limit` applies a process-wide token bucket to proxy requests; excess requests get HTTP 429.
 
 ## Project tags, shadow pricing & privacy
 
-- **Project tags** — send `X-Odo-Project: <name>` (or `X-Project`) on any request; costs segment per project in the dashboard, `/api/stats?project=<id>`, and `odotoken stats --by-project`.
-- **Shadow pricing** — local models (free rates) get a `shadow_cost` priced at the configured `cloud_equivalent` model; the dashboard shows a "Saved vs Cloud" KPI when savings exist.
-- **Privacy** — logs pass through a PII redactor (keys, tokens, emails, CPF/CNPJ, home paths; extend via `privacy.custom_patterns`). `privacy.store_prompts` (default **false**) opts into storing only a SHA-256 hash + 200-char redacted preview per event.
-- **Prometheus** — `GET /metrics` on the proxy port serves text-format metrics; import `examples/grafana-dashboard.json` or run `docker compose -f examples/docker-compose.observability.yml up -d`.
-- **Mock & chaos** — set a provider upstream to `mock://local` for synthetic responses (no network, still metered). Enable `chaos: {enabled: true, rate: 0.05, errors: [429,500], latency_ms: 3000}` to test client resilience; `X-Odo-No-Chaos: true` bypasses.
-- **Freeform tags** — send `X-Odo-Tags: prod,critical` (space- or comma-separated); segment in the dashboard via the **Tag** filter (`/api/stats?tag=<name>`), and `get_summary_by_tag`.
-- **Throughput & forecast** — `GET /api/tps` (TPS/TTFT by model, project, interval) powers the Throughput view; `GET /api/forecast` fits a linear trend to daily cost and flags anomalies on the Overview card.
-- **Alerts** — on `warning`/`breached`, `dispatch_alerts` posts to Slack/Discord/Telegram/SMTP and calls the webhook; per-project alerts fire from `limits.projects`. Configure under `limits.alerts`.
-- **Per-project rate limit** — `limits.rate_limit.requests_per_min` or `tokens_per_min` (0 = disabled) applies a token bucket per `X-Odo-Project` id; excess requests get HTTP 429 with `Retry-After`.
-- **Replay & optimize** — `odotoken replay [--apply]` re-prices history with current `prices.json`; `odotoken optimize` suggests cheaper/equivalent models from recent spend.
-- **Dashboard auth** — `auth.bearer_token`/`auth.basic` in `config.json` gate `/api/*` and the dashboard (Bearer or Basic challenge; unset = open on localhost).
+- **Project tags** — send `X-Odo-Project: <name>` on any request; costs segment per project in the dashboard and `odotoken stats --by-project`.
+- **Live runs** — `GET /api/sessions/live` lists real model requests currently in flight (the dashboard polls it every 2 seconds). Send `X-Odo-Session: <conversation-id>` to group concurrent calls from one conversation; each request still receives its own `run_id`.
+- **Shadow pricing** — local models can carry a `shadow_cost` priced at a cloud equivalent; the dashboard shows "Saved vs Cloud" when the two differ.
+- **Privacy** — odotoken stores usage metadata, not prompt or response content. Imported messages are never parsed. No PII redactor is currently applied, so do not treat the database as scrubbed.
+- **Freeform tags** — send `X-Odo-Tags: prod,critical`; segment the dashboard with the **Tag** filter.
+- **Throughput & forecast** — `GET /api/tps` powers the Throughput view; `GET /api/forecast` fits a linear trend to daily cost and flags anomalies on the Overview card.
+- **Dashboard auth** — `server.api_key` or `ODO_API_KEY` gates `/api/*` and `/v1/*` with Bearer or `X-Api-Key`; an empty key leaves them open on the loopback-only default.
 
 ## Troubleshooting
 
@@ -294,9 +259,10 @@ journalctl --user -u odotoken -n 50 --no-pager
 ## Development
 
 ```bash
-.venv/bin/pip install -e ".[dev]" 2>/dev/null || .venv/bin/pip install -e . pytest pytest-asyncio
-.venv/bin/pytest                          # 125 tests (unit, integration, CLI, golden)
-cd frontend && pnpm install && pnpm build  # build dashboard → src/odotoken/static/
+make build                                 # compiles ./cmd/odotoken → bin/odotoken
+make test                                  # go test -race ./...
+cd frontend && pnpm install && pnpm build   # build dashboard → internal/server/static/
+```
 
 ## License
 

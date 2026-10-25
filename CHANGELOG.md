@@ -31,7 +31,7 @@ All notable changes to this project will be documented in this file.
 - `sessions` section in `config.json` and `src/odotoken/infra/config.py` (`enabled`, `paths` per CLI)
 - Project tags (`X-Odo-Project` / `X-Project` header) — `project_id` column, `get_summary_by_project`, dashboard project filter, `odotoken stats --by-project`
 - Shadow pricing (`shadow_cost` column, `PricingCalculator.calculate_shadow_cost`, `cloud_equivalent` in catalog, "Saved vs Cloud" KPI)
-- PII redaction for logs (`src/odotoken/infra/redact.py`, `privacy.redact_logs` + `privacy.custom_patterns`) and opt-in prompt preview (`privacy.store_prompts` → SHA-256 hash + 200-char redacted preview)
+- Usage-only import and proxy metadata storage; prompt and response content are not parsed. Earlier releases advertised a Python PII redactor that is not present in the Go implementation.
 - Prometheus text-format metrics at `GET /metrics` on the proxy port, Grafana dashboard + `docker-compose.observability.yml` + `prometheus.yml`
 - Mock provider (`mock://local` upstream, synthetic metered responses) and chaos middleware (`chaos.enabled`, `rate`, `errors`, `latency_ms`; bypass via `X-Odo-No-Chaos`)
 - Budget guard `monthly_tokens_limit` + `webhook_url` (notified on `warning`/`breached` via `PATCH /api/guard/limits`, also persisted to `config.json`)
