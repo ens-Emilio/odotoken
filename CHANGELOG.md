@@ -2,11 +2,30 @@
 
 All notable changes to this project will be documented in this file.
 
-## [Unreleased]
+## [0.5.0] - 2026-10-25
+### Added
+- Real in-flight run tracking through `active_runs`, `GET /api/sessions/live`, and an independently polled Live Runs panel
+- `X-Odo-Session` request header for grouping concurrent model calls by conversation while retaining a unique `run_id`
+- Lightweight `/api/guard/status` and `/api/filters` endpoints; CSV and SVG snapshot exports
+- Budget transition history in the dashboard, guard timing based on an explicit IANA timezone, and `alert`/`block` breach behavior
+- Pricing coverage warnings for models missing from the local price catalog
+- Frontend Vitest coverage, actionable empty/error states, keyboard-sortable tables, and reduced-motion support
+
 ### Changed
-- Dashboard filter bar redesigned: Source/Project/Tag moved into a compact "Filters" dropdown with active-count badge; Time and Theme remain inline; removed label spans that broke layout on narrow viewports
-- Select dropdown: fixed dark-mode contrast on active item (`rgba(255,255,255,0.15)` over `#1e1e1e`), constrained to 256px max-width with text truncation for long project names
-- Tailwind v4 dark variant configured via `@variant dark (&:where(.dark, .dark *))` in `index.css`
+- Replaced the legacy Python service with the complete Go runtime and rebuilt the shipped dashboard
+- Hardened network defaults, API authentication, CORS, request-body limits, and outbound alert timeouts
+- Made dashboard filters stable across 7-day/30-day ranges and split expensive aggregate loading from shell status/filter requests
+- Reduced polling pressure for historical windows and added composite SQLite indexes
+
+### Fixed
+- Correctly account for exact provider usage on OpenAI-compatible custom providers
+- Compute local-day windows in the configured timezone instead of mixing local labels with UTC boundaries
+- Surface storage/query partition failures instead of rendering misleading zero or partial data
+- Remove the unused token counter helper that blocked the CI lint job
+
+## [0.4.0] - 2026-10-23
+### Changed
+- Added the clean filter bar, dark mode contrast fixes, and Go 1.26 CI toolchain fixes published in the prior GitHub release
 
 ## [0.3.0] - 2026-10-22
 ### Added

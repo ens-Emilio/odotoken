@@ -49,6 +49,8 @@ El uso de tokens se extrae tanto de respuestas JSON como de streams SSE (incluye
 
 ## Instalación
 
+Descarga el binario de tu plataforma desde la [última versión de GitHub](https://github.com/ens-Emilio/odotoken/releases/latest), o compila desde el código fuente:
+
 ```bash
 git clone https://github.com/ens-Emilio/odotoken.git
 cd odotoken
