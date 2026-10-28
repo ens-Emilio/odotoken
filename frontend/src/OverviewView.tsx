@@ -1,14 +1,129 @@
-import { useMemo } from 'react'
-import { useForecast, useLiveSessions, useStats } from './api'
-import { formatNumber, formatNumberCompact, formatCurrency, formatLatency, formatTps, sinceForFilter, formatTimestamp, formatTime } from './format'
+import { useMemo, useState } from 'react'
+import { useForecast, useLiveSessions, useStats, useDailyDetail } from './api'
+import type { DailyRow, ModelRow, EventRow, SourceRow, LiveSession, ProjectRow } from './types'
+import type { ForecastPoint, Anomaly } from './types'
 import { Card, CardHeader, Badge } from './ui/Card'
-import { SortableTable, type Column } from './ui/SortableTable'
-import { BarChart, Bar, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts'
-import type { EventRow, ProjectRow, ModelRow, SourceRow, LiveSession, ForecastPoint, Anomaly } from './types'
+import { SortableTable } from './ui/SortableTable'
+import type { Column } from './ui/SortableTable'
+import { Pie, PieChart, Cell, Tooltip, Legend, ResponsiveContainer, BarChart, CartesianGrid, XAxis, YAxis, Bar, Line } from 'recharts'
+import { formatCurrency, formatNumber, formatNumberCompact, formatLatency, formatTimestamp, formatTime, formatTps, sinceForFilter } from './format'
 import { useTimezone } from './context/useTimezone'
 
-const PIE_COLORS = ['var(--chart-1)', 'var(--chart-2)', 'var(--chart-3)', 'var(--chart-4)', 'var(--chart-5)', 'var(--chart-6)', 'var(--chart-7)']
+const PIE_COLORS = ['#10b981', '#3b82f6', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#14b8a6', '#f97316']
+function ConsumoDiario({ daily }: { daily: DailyRow[] }) {
+  const [viewDate, setViewDate] = useState(new Date())
+  const [selected, setSelected] = useState<string | null>(null)
+  const { timezone } = useTimezone()
+  const { data: detail, isLoading: detailLoading } = useDailyDetail(selected, timezone)
 
+  const year = viewDate.getFullYear()
+  const month = viewDate.getMonth()
+  const firstDay = new Date(year, month, 1).getDay()
+  const daysInMonth = new Date(year, month + 1, 0).getDate()
+
+  const dailyMap = useMemo(() => {
+    const m = new Map<string, DailyRow>()
+    for (const d of daily) m.set(d.day, d)
+    return m
+  }, [daily])
+
+  const maxCost = useMemo(() => Math.max(...daily.map(d => d.cost_usd), 0.01), [daily])
+
+  const cells: { day: number; dateStr: string; row?: DailyRow }[] = []
+  for (let i = 0; i < firstDay; i++) cells.push({ day: 0, dateStr: '' })
+  for (let d = 1; d <= daysInMonth; d++) {
+    const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`
+    cells.push({ day: d, dateStr, row: dailyMap.get(dateStr) })
+  }
+
+  const intensity = (cost: number) => {
+    if (cost <= 0) return 'bg-[var(--bg-fill)] text-[var(--text-soft)]'
+    const ratio = cost / maxCost
+    if (ratio > 0.6) return 'bg-emerald-600/80 text-white/90'
+    if (ratio > 0.3) return 'bg-emerald-500/60 text-white/80'
+    return 'bg-emerald-400/40 text-white/70'
+  }
+
+  const weekdays = ['S', 'T', 'Q', 'Q', 'S', 'S', 'D']
+  const today = new Date()
+  const isTodayVisible = year === today.getFullYear() && month === today.getMonth()
+  const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`
+
+  const prevMonth = () => setViewDate(new Date(year, month - 1, 1))
+  const nextMonth = () => setViewDate(new Date(year, month + 1, 1))
+  const goToday = () => { setViewDate(new Date()); setSelected(null) }
+
+  const monthLabel = new Intl.DateTimeFormat('pt-BR', { month: 'long', year: 'numeric' }).format(viewDate)
+
+  // Use detail from API if available, otherwise fall back to dailyMap row
+  const selectedRow = selected ? dailyMap.get(selected) : undefined
+  const displayCost = detail?.summary?.total_cost_usd ?? selectedRow?.cost_usd ?? 0
+  const displayTokens = detail?.summary?.total_tokens ?? selectedRow?.total_tokens ?? 0
+  const displayReqs = detail?.summary?.total_requests ?? selectedRow?.requests ?? 0
+
+  return (
+    <Card className="w-full">
+      <div className="flex items-start justify-between px-5 pt-4 pb-3">
+        <div>
+          <h3 className="text-[13px] font-semibold text-[var(--text-strong)]">Consumo Diário</h3>
+          <p className="mt-0.5 text-[11px] text-[var(--text-soft)]">clique em um dia para ver detalhes</p>
+        </div>
+        <div className="flex items-center gap-1">
+          <button onClick={prevMonth} className="flex h-6 w-6 items-center justify-center rounded text-[var(--text-soft)] hover:bg-[var(--bg-fill)] hover:text-[var(--text-strong)]" title="Mês anterior">‹</button>
+          <span className="min-w-[110px] text-center text-[11px] font-medium capitalize text-[var(--text-strong)]">{monthLabel}</span>
+          <button onClick={nextMonth} className="flex h-6 w-6 items-center justify-center rounded text-[var(--text-soft)] hover:bg-[var(--bg-fill)] hover:text-[var(--text-strong)]" title="Próximo mês">›</button>
+          {!isTodayVisible && (
+            <button onClick={goToday} className="ml-1 rounded bg-[var(--bg-fill)] px-1.5 py-0.5 text-[9px] font-medium text-[var(--text-soft)] hover:text-[var(--text-strong)]">Hoje</button>
+          )}
+        </div>
+      </div>
+      <div className="px-3 pb-2">
+        <div className="mb-1.5 grid grid-cols-7 gap-1 text-center text-[9px] font-semibold uppercase tracking-wider text-[var(--text-faint)]">
+          {weekdays.map((w, i) => <div key={i} className="py-0.5">{w}</div>)}
+        </div>
+        <div className="grid grid-cols-7 gap-1">
+          {cells.map((cell, i) => {
+            if (!cell.day) return <button key={i} disabled className="h-9 rounded bg-transparent text-transparent cursor-default" />
+            const isToday = cell.dateStr === todayStr
+            const isSelected = cell.dateStr === selected
+            const cost = cell.row?.cost_usd ?? 0
+            return (
+              <button
+                key={i}
+                onClick={() => setSelected(isSelected ? null : cell.dateStr)}
+                title={`${cell.dateStr}: ${formatCurrency(cost)} · ${formatNumberCompact(cell.row?.total_tokens ?? 0)} tokens`}
+                className={`flex h-9 items-center justify-center rounded text-[11px] font-medium tabular-nums transition-colors cursor-pointer hover:brightness-110 ${isSelected ? 'ring-2 ring-[var(--brand)] ring-offset-1 ring-offset-[var(--bg-card)] ' : isToday ? 'ring-2 ring-emerald-400 ring-offset-1 ring-offset-[var(--bg-panel)] ' : ''}${intensity(cost)}`}
+              >
+                {cell.day}
+              </button>
+            )
+          })}
+        </div>
+        {selected && (
+          <div className="mt-3 flex items-center gap-4 rounded border border-[var(--border-soft)] bg-[var(--bg-fill)] px-3 py-2 text-[11px]">
+            <span className="font-semibold text-[var(--text-strong)]">{selected}</span>
+            {detailLoading ? (
+              <span className="text-[var(--text-faint)]">carregando…</span>
+            ) : (
+              <>
+                <span className="text-[var(--text-soft)]">{formatCurrency(displayCost)}</span>
+                <span className="text-[var(--text-soft)]">{formatNumberCompact(displayTokens)} tokens</span>
+                <span className="text-[var(--text-soft)]">{displayReqs} reqs</span>
+              </>
+            )}
+          </div>
+        )}
+        <div className="mt-2 flex items-center justify-end gap-1 text-[9px] text-[var(--text-faint)]">
+          <span>Menos</span>
+          {[0, 0.3, 0.6, 1].map((r, i) => (
+            <span key={i} className={`inline-block h-2.5 w-2.5 rounded-sm ${r === 0 ? 'bg-[var(--bg-fill)]' : r > 0.6 ? 'bg-emerald-600/80' : r > 0.3 ? 'bg-emerald-500/60' : 'bg-emerald-400/40'}`} />
+          ))}
+          <span>Mais</span>
+        </div>
+      </div>
+    </Card>
+  )
+}
 
 function KpiSkeleton() {
   return (
@@ -20,12 +135,12 @@ function KpiSkeleton() {
   )
 }
 
-function Kpi({ label, value, sub, color }: { label: string; value: string; sub: string; color: string }) {
+function Kpi({ label, value, sub, color }: { label: string; value: string; sub?: string; color?: string }) {
   return (
     <Card className="p-5">
-      <div className="text-[11px] font-semibold uppercase tracking-wider text-[var(--text-soft)]">{label}</div>
-      <div className={`num mt-2 text-[28px] font-bold leading-none tabular-nums ${color}`}>{value}</div>
-      <div className="mt-1 text-[11px] text-[var(--text-soft)]" title={sub}>{sub}</div>
+      <div className="text-[11px] font-medium uppercase tracking-wider text-[var(--text-soft)]">{label}</div>
+      <div className={`mt-2 text-[22px] font-bold tabular-nums ${color ?? 'text-[var(--text-strong)]'}`}>{value}</div>
+      {sub && <div className="mt-1 text-[11px] text-[var(--text-soft)]">{sub}</div>}
     </Card>
   )
 }
@@ -35,7 +150,15 @@ export default function OverviewView({ timeFilter, project, source, tag }: { tim
  const since = useMemo(() => sinceForFilter(timeFilter, timezone), [timeFilter, timezone])
  const { data, isLoading, error } = useStats(since, project, source, tag, timezone)
  const { data: forecastData } = useForecast(tag !== 'all' ? tag : undefined, timezone)
- const { data: liveSessions = [] } = useLiveSessions()
+  const { data: liveSessions = [] } = useLiveSessions()
+ // ponytail: 35-day window for calendar heatmap, using midnight UTC of today minus 35 days for stable cache key
+ const todayStr = new Date().toISOString().slice(0, 10)
+ const calendarSince = useMemo(() => {
+   const d = new Date(todayStr + 'T00:00:00Z')
+   d.setDate(d.getDate() - 35)
+   return d.toISOString()
+ }, [todayStr])
+  const { data: calendarData } = useStats(calendarSince, project, source, tag, timezone)
 
  const recentEvents = data?.recent_events ?? []
  const pieData = useMemo(() => {
@@ -114,9 +237,11 @@ export default function OverviewView({ timeFilter, project, source, tag }: { tim
         <Kpi label="Saved vs Cloud" value={formatCurrency(savings?.saved_usd ?? 0)} sub={savings ? `shadow ${formatCurrency(savings.shadow_usd)}` : '—'} color="text-[var(--chart-1)]" />
       </div>
 
-      {/* Charts */}
-      <div className="grid grid-cols-1 gap-5 lg:grid-cols-3">
-        <Card className="lg:col-span-2">
+      {/* Consumo Diário + Charts row */}
+      <div className="grid grid-cols-1 gap-5 lg:grid-cols-[minmax(280px,380px)_1fr_1fr]">
+        <ConsumoDiario daily={calendarData?.daily ?? []} />
+
+        <Card>
           <CardHeader title="Daily Consumption" subtitle="tokens per day with cost overlay" />
           <div className="h-64 px-1 pb-4">
             <ResponsiveContainer width="100%" height="100%">
@@ -183,7 +308,7 @@ export default function OverviewView({ timeFilter, project, source, tag }: { tim
           <CardHeader title="Top Models" subtitle="by token volume" />
           <SortableTable
             rows={by_model ?? []}
-            rowKey={(m) => m.model + m.provider}
+            rowKey={(m: ModelRow) => m.model + m.provider}
             pageSize={8}
             columns={[
              { key: 'model', header: 'Model', render: (m: ModelRow) => <span className="font-medium text-[var(--text-strong)]">{m.model || '—'}</span>, sortValue: (m: ModelRow) => m.model },
@@ -198,7 +323,7 @@ export default function OverviewView({ timeFilter, project, source, tag }: { tim
           <CardHeader title="Projects" subtitle="cost per X-Odo-Project tag" />
           <SortableTable
             rows={by_project ?? ([] as ProjectRow[])}
-            rowKey={(p) => p.project_id}
+            rowKey={(p: ProjectRow) => p.project_id}
             pageSize={8}
             columns={[
              { key: 'project', header: 'Project', render: (p: ProjectRow) => <Badge>{p.project_id}</Badge>, sortValue: (p: ProjectRow) => p.project_id },
@@ -217,7 +342,7 @@ export default function OverviewView({ timeFilter, project, source, tag }: { tim
           <CardHeader title="By Source" subtitle="proxy vs imported CLI sessions" />
           <SortableTable
             rows={data.by_source}
-            rowKey={(s) => s.source}
+            rowKey={(s: SourceRow) => s.source}
             columns={[
 { key: 'source', header: 'Source', render: (s: SourceRow) => <Badge tone={s.source === 'proxy' ? 'brand' : 'neutral'}>{s.source}</Badge>, sortValue: (s: SourceRow) => s.source },
 { key: 'requests', header: 'Requests', align: 'right', render: (s: SourceRow) => <span className="num tabular-nums">{formatNumber(s.requests)}</span>, sortValue: (s: SourceRow) => s.requests },
@@ -268,7 +393,7 @@ export default function OverviewView({ timeFilter, project, source, tag }: { tim
       {/* Recent events */}
       <Card>
         <CardHeader title="Recent Requests" subtitle="latest 50 events" right={<Badge tone="brand">refreshes every 10s</Badge>} />
-        <SortableTable rows={events} rowKey={(e) => e.id} columns={eventColumns} pageSize={10} />
+        <SortableTable rows={events} rowKey={(e: EventRow) => e.id} columns={eventColumns} pageSize={10} />
       </Card>
     </div>
   )

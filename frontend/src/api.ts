@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query'
- import type { Stats, TpsData, Forecast, LiveSession, EventRow } from './types'
+ import type { Stats, TpsData, Forecast, LiveSession, EventRow, DailyDetail } from './types'
 
 export interface GuardEvent {
   id: number
@@ -138,6 +138,26 @@ export function useLiveSessions() {
     refetchInterval: 2_000,
  })
  }
+
+ export function useDailyDetail(day: string | null, tz?: string, project?: string, source?: string, tag?: string) {
+  const params = new URLSearchParams()
+  if (day) params.set('day', day)
+  if (tz) params.set('tz', tz)
+  if (project && project !== 'all') params.set('project', project)
+  if (source && source !== 'all') params.set('source', source)
+  if (tag && tag !== 'all') params.set('tag', tag)
+  const qs = params.toString()
+  return useQuery<DailyDetail>({
+    queryKey: ['daily-detail', day ?? 'none', tz ?? 'UTC', project ?? 'all', source ?? 'all', tag ?? 'all'],
+    queryFn: async () => {
+      const res = await fetch(`/api/stats/daily-detail?${qs}`)
+      if (!res.ok) throw new Error(`daily detail: ${res.status}`)
+      return res.json()
+    },
+    enabled: !!day,
+    staleTime: 30_000,
+  })
+}
 
  export function useEvents(since?: string, project?: string, source?: string, tag?: string, limit = 50) {
  const params = new URLSearchParams()

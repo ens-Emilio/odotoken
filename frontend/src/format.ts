@@ -43,8 +43,8 @@ export function sinceForFilter(filter: string, timezone?: string): string | unde
     d.setHours(0, 0, 0, 0)
     return d.toISOString()
   }
-  if (filter === '7d') return new Date(Date.now() - 7 * 86400000).toISOString()
-  if (filter === '30d') return new Date(Date.now() - 30 * 86400000).toISOString()
+  const m = /^(\d+)d$/.exec(filter)
+  if (m) return new Date(Date.now() - Number(m[1]) * 86400000).toISOString()
   return undefined
 }
 

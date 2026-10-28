@@ -2,6 +2,20 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.6.0] - 2026-10-28
+### Added
+- 21 color palettes inspired by native fruits from Acre, Brazil — each palette extracts real tones from skin, pulp and leaves of Amazonian fruits (Açaí, Cupuaçu, Pupunha, Tucumã, Bacuri, Biribá, Buriti, Bacaba, Patauá, Ingá, Taperebá, Abiu, Uxi, Araçá-boi, Banana, Abacaxi, Graviola, Maracujá, Manga, Mamão, Melancia)
+- Click-controlled palette selector in the dashboard header with colored circle icons replacing emojis
+- Beautiful trilingual READMEs (PT-BR, EN, ES) with full documentation of the fruit-inspired color system
+
+### Changed
+- Filter labels updated from months to days ("90 days" / "180 days" instead of "3 months" / "6 months") for consistency
+- Palette dropdown switched from hover-based (group-hover) to click-controlled with mousedown-outside listener for stability
+
+### Fixed
+- Calendar heatmap now recalculates the 35-day window on every render using a stable midnight-based date string, ensuring today is always included and days 22-27 of October display correctly
+- Removed frozen useMemo dependency that caused the calendar query key to change every millisecond, breaking React Query cache stability
+
 ## [0.5.0] - 2026-10-25
 ### Added
 - Real in-flight run tracking through `active_runs`, `GET /api/sessions/live`, and an independently polled Live Runs panel

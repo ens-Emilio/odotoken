@@ -406,7 +406,7 @@ func (d *Database) localDailyUsage(days int, since, source string, tz ...string)
 // GetDailyUsage returns per-day usage for the last N days.
 func (d *Database) GetDailyUsage(days int, since, source string, tz ...string) ([]DailyUsage, error) {
 	if days <= 0 {
-		days = 30
+		days = 45
 	}
 	return d.localDailyUsage(days, since, source, tz...)
 }
@@ -906,6 +906,96 @@ func (d *Database) ExpireOrphanRuns(maxIdle time.Duration) error {
 	retentionCutoff := time.Now().UTC().Add(-7 * 24 * time.Hour).Format(time.RFC3339Nano)
 	_, err = d.db.Exec(`DELETE FROM active_runs WHERE finished_at IS NOT NULL AND finished_at < ?`, retentionCutoff)
 	return err
+}
+
+// DailyDetailRow holds aggregated usage for a single day filtered by client or source.
+type DailyDetailRow struct {
+	Key         string  `json:"key"`
+	Requests    int     `json:"requests"`
+	TotalTokens int     `json:"total_tokens"`
+	CostUSD     float64 `json:"cost_usd"`
+}
+
+// GetDailyDetail returns per-client and per-source breakdown for a specific day,
+// respecting the user's timezone so the clicked calendar cell matches local midnight.
+func (d *Database) GetDailyDetail(day, tz, project, source, tag string) (summary Summary, byClient []DailyDetailRow, bySource []DailyDetailRow, err error) {
+	loc := time.UTC
+	if tz != "" && tz != "UTC" {
+		if l, loadErr := time.LoadLocation(tz); loadErr == nil {
+			loc = l
+		}
+	}
+	dayStart, parseErr := time.ParseInLocation("2006-01-02", day, loc)
+	if parseErr != nil {
+		return summary, nil, nil, fmt.Errorf("invalid day format: %w", parseErr)
+	}
+	dayEnd := dayStart.Add(24 * time.Hour)
+	startStr := dayStart.UTC().Format(time.RFC3339)
+	endStr := dayEnd.UTC().Format(time.RFC3339)
+
+	baseWhere := "WHERE timestamp >= ? AND timestamp < ?"
+	args := []interface{}{startStr, endStr}
+	if project != "" && project != "all" {
+		baseWhere += " AND project_id = ?"
+		args = append(args, project)
+	}
+	if source != "" && source != "all" {
+		baseWhere += " AND source = ?"
+		args = append(args, source)
+	}
+	if tag != "" && tag != "all" {
+		baseWhere += " AND (',' || tags || ',') LIKE ?"
+		args = append(args, "%,"+tag+",%")
+	}
+
+	sumQ := fmt.Sprintf(`SELECT COALESCE(COUNT(*),0), COALESCE(SUM(prompt_tokens),0), COALESCE(SUM(completion_tokens),0),
+		COALESCE(SUM(total_tokens),0), COALESCE(SUM(cache_read_tokens),0), COALESCE(SUM(cache_write_tokens),0),
+		COALESCE(SUM(cost_usd),0), COALESCE(AVG(latency_ms),0), COALESCE(AVG(ttfb_ms),0)
+		FROM token_events %s`, baseWhere)
+	row := d.db.QueryRow(sumQ, args...)
+	if scanErr := row.Scan(&summary.TotalRequests, &summary.PromptTokens, &summary.CompletionTokens,
+		&summary.TotalTokens, &summary.CacheReadTokens, &summary.CacheWriteTokens,
+		&summary.TotalCostUSD, &summary.AvgLatencyMs, &summary.AvgTTFBMs); scanErr != nil && scanErr != sql.ErrNoRows {
+		return summary, nil, nil, scanErr
+	}
+
+	clientQ := fmt.Sprintf(`SELECT client_app, COUNT(*) AS requests, SUM(total_tokens) AS total_tokens, SUM(cost_usd) AS cost_usd
+		FROM token_events %s GROUP BY client_app ORDER BY cost_usd DESC`, baseWhere)
+	cRows, cErr := d.db.Query(clientQ, args...)
+	if cErr != nil {
+		return summary, nil, nil, cErr
+	}
+	defer cRows.Close()
+	for cRows.Next() {
+		var r DailyDetailRow
+		if scanErr := cRows.Scan(&r.Key, &r.Requests, &r.TotalTokens, &r.CostUSD); scanErr != nil {
+			return summary, nil, nil, scanErr
+		}
+		byClient = append(byClient, r)
+	}
+	if cRows.Err() != nil {
+		return summary, nil, nil, cRows.Err()
+	}
+
+	sourceQ := fmt.Sprintf(`SELECT source, COUNT(*) AS requests, SUM(total_tokens) AS total_tokens, SUM(cost_usd) AS cost_usd
+		FROM token_events %s GROUP BY source ORDER BY cost_usd DESC`, baseWhere)
+	sRows, sErr := d.db.Query(sourceQ, args...)
+	if sErr != nil {
+		return summary, nil, nil, sErr
+	}
+	defer sRows.Close()
+	for sRows.Next() {
+		var r DailyDetailRow
+		if scanErr := sRows.Scan(&r.Key, &r.Requests, &r.TotalTokens, &r.CostUSD); scanErr != nil {
+			return summary, nil, nil, scanErr
+		}
+		bySource = append(bySource, r)
+	}
+	if sRows.Err() != nil {
+		return summary, nil, nil, sRows.Err()
+	}
+
+	return summary, byClient, bySource, nil
 }
 
 // GetLiveSessions returns actual in-flight runs, not completed event rows.

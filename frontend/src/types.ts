@@ -56,6 +56,13 @@ export interface DailyRow {
   cost_usd: number
 }
 
+export interface DailyDetail {
+  day: string
+  summary: Summary
+  by_client: ClientRow[]
+  by_source: SourceRow[]
+}
+
 export interface GuardInfo {
   limits: {
     daily_cost_limit_usd: number | null

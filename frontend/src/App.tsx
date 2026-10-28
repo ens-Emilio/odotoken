@@ -13,6 +13,7 @@ import { TimezoneProvider } from './context/TimezoneContext'
 import { AnimatePresence, motion } from 'motion/react'
 import { Sidebar } from './Shell'
 import { useTheme } from './theme'
+import { PALETTES, type PaletteId } from './themes'
 import { ToastHost } from './ui/Toast'
 import { toast } from './ui/toast-store'
 import { Select } from './ui/Select'
@@ -151,7 +152,7 @@ export default function App() {
               </div>
             </div>
             <div className="flex items-center gap-0.5 rounded-lg border border-[var(--border)] bg-[var(--bg-panel)] p-0.5">
-              {(['today', '7d', '30d', 'all'] as const).map((f) => (
+              {(['today', '7d', '30d', '90d', '180d', '365d', 'all'] as const).map((f) => (
                 <button
                   key={f}
                   className={`rounded-md px-2.5 py-1.5 text-[11px] font-medium transition-colors ${
@@ -162,10 +163,11 @@ export default function App() {
                   aria-pressed={timeFilter === f}
                   onClick={() => setTimeFilter(f)}
                 >
-                  {f === 'today' ? 'Today' : f === '7d' ? '7 days' : f === '30d' ? '30 days' : 'All'}
+                  {f === 'today' ? 'Today' : f === '7d' ? '7 days' : f === '30d' ? '30 days' : f === '90d' ? '90 days' : f === '180d' ? '180 days' : f === '365d' ? '365 days' : 'All'}
                 </button>
               ))}
             </div>
+            <PaletteSelector palette={theme.palette} setPalette={theme.setPalette} />
             <button
               className="rounded-lg border border-[var(--border)] bg-[var(--bg-panel)] p-2 text-[var(--text-muted)] hover:text-[var(--text-strong)]"
               title={`Theme: ${theme.mode}`}
@@ -201,4 +203,54 @@ function ThemeGlyph({ mode }: { mode: 'light' | 'dark' | 'system' }) {
   if (mode === 'dark') return <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" {...stroke}><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
   if (mode === 'light') return <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" {...stroke}><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/></svg>
   return <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" {...stroke}><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg>
+}
+
+function PaletteSelector({ palette, setPalette }: { palette: PaletteId; setPalette: (id: PaletteId) => void }) {
+  const [open, setOpen] = useState(false)
+  const ref = useRef<HTMLDivElement>(null)
+  const current = PALETTES.find(p => p.id === palette) ?? PALETTES[0]
+
+  useEffect(() => {
+    if (!open) return
+    const handler = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [open])
+
+  return (
+    <div className="relative" ref={ref}>
+      <button
+        onClick={() => setOpen(v => !v)}
+        className="flex items-center gap-1.5 rounded-lg border border-[var(--border)] bg-[var(--bg-panel)] px-2 py-2 text-[var(--text-muted)] hover:text-[var(--text-strong)]"
+        title={`Paleta: ${current.name}`}
+        aria-label={`Paleta: ${current.name}`}
+        aria-expanded={open}
+      >
+        <span className="inline-block h-3.5 w-3.5 rounded-full border border-[var(--border)]" style={{ backgroundColor: current.color }} />
+      </button>
+      {open && (
+        <div className="absolute right-0 top-full z-40 mt-1.5 w-[220px] max-h-[420px] overflow-auto rounded-xl border border-[var(--border)] bg-[var(--bg-elevated)] p-2 shadow-[var(--shadow-pop)]">
+          <div className="mb-1.5 px-2 text-[10px] font-semibold uppercase tracking-wider text-[var(--text-faint)]">Paleta de Cores</div>
+          <div className="space-y-0.5">
+            {PALETTES.map((p) => (
+              <button
+                key={p.id}
+                onClick={() => { setPalette(p.id); setOpen(false) }}
+                className={`flex w-full items-center gap-2.5 rounded-md px-2 py-1.5 text-left text-[11px] transition-colors ${
+                  palette === p.id
+                    ? 'bg-[var(--accent)] text-[var(--accent-contrast)]'
+                    : 'text-[var(--text-muted)] hover:bg-[var(--bg-fill-secondary)] hover:text-[var(--text-strong)]'
+                }`}
+              >
+                <span className="inline-block h-3.5 w-3.5 shrink-0 rounded-full border border-[var(--border)]" style={{ backgroundColor: p.color }} />
+                <span className="font-medium">{p.name}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  )
 }

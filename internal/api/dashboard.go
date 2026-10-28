@@ -287,7 +287,7 @@ func dashboardRouter(
 		if err != nil {
 			partitionErrs = append(partitionErrs, "recent_events")
 		}
-		daily, err := database.GetDailyUsage(30, since, source, tz)
+		daily, err := database.GetDailyUsage(45, since, source, tz)
 		if err != nil {
 			partitionErrs = append(partitionErrs, "daily")
 		}
@@ -474,6 +474,60 @@ func dashboardRouter(
 		})
 	})
 
+	r.Get("/stats/daily-detail", func(w http.ResponseWriter, r *http.Request) {
+		day := r.URL.Query().Get("day")
+		if day == "" {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "day is required (YYYY-MM-DD)"})
+			return
+		}
+		tz := r.URL.Query().Get("tz")
+		project := r.URL.Query().Get("project")
+		source := r.URL.Query().Get("source")
+		tag := r.URL.Query().Get("tag")
+
+		summary, byClient, bySource, err := database.GetDailyDetail(day, tz, project, source, tag)
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": fmt.Sprintf("daily detail unavailable: %v", err)})
+			return
+		}
+
+		clientRows := make([]map[string]interface{}, 0, len(byClient))
+		for _, c := range byClient {
+			clientRows = append(clientRows, map[string]interface{}{
+				"client_app":   c.Key,
+				"requests":     c.Requests,
+				"total_tokens": c.TotalTokens,
+				"cost_usd":     c.CostUSD,
+			})
+		}
+		sourceRows := make([]map[string]interface{}, 0, len(bySource))
+		for _, s := range bySource {
+			sourceRows = append(sourceRows, map[string]interface{}{
+				"source":       s.Key,
+				"requests":     s.Requests,
+				"total_tokens": s.TotalTokens,
+				"cost_usd":     s.CostUSD,
+			})
+		}
+
+		writeJSON(w, http.StatusOK, map[string]interface{}{
+			"day": day,
+			"summary": map[string]interface{}{
+				"total_requests":           summary.TotalRequests,
+				"total_prompt_tokens":      summary.PromptTokens,
+				"total_completion_tokens":  summary.CompletionTokens,
+				"total_tokens":             summary.TotalTokens,
+				"total_cache_read_tokens":  summary.CacheReadTokens,
+				"total_cache_write_tokens": summary.CacheWriteTokens,
+				"total_cost_usd":           summary.TotalCostUSD,
+				"avg_latency_ms":           summary.AvgLatencyMs,
+				"avg_ttfb_ms":              summary.AvgTTFBMs,
+			},
+			"by_client": clientRows,
+			"by_source": sourceRows,
+		})
+	})
+
 	r.Get("/stats.csv", func(w http.ResponseWriter, r *http.Request) {
 		since := resolveSince(r.URL.Query().Get("since"))
 		project := r.URL.Query().Get("project")
@@ -619,7 +673,7 @@ func dashboardRouter(
 	r.Get("/forecast", func(w http.ResponseWriter, r *http.Request) {
 		tag := r.URL.Query().Get("tag")
 		tz := r.URL.Query().Get("tz")
-		daily, _ := database.GetDailyUsage(30, "", tag, tz)
+		daily, _ := database.GetDailyUsage(45, "", tag, tz)
 		costs := make([]float64, len(daily))
 		for i, d := range daily {
 			costs[i] = d.CostUSD
