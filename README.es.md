@@ -1,273 +1,142 @@
-# 🍇 odotoken
-**Proxy transparente de medición de tokens de IA, rastreador de uso y guarda de presupuesto.**
-> **v0.6.0** — Paletas de colores inspiradas en frutas nativas del **Acre, Brasil** 🌿
-**[Português (BR)](README.md) · [English](README.en.md) · [Español](README.es.md)**
----
-## 🎨 Paletas de Colores: Frutas del Acre
-El dashboard de odotoken ahora ofrece **21 paletas de colores** extraídas directamente de los tonos reales de la cáscara, pulpa y hojas de frutas nativas y típicas del estado amazónico de Acre, Brasil:
-| Fruta | Color Dominante | Inspiración |
-|-------|----------------|-------------|
-| **Açaí** | `#7A3E7D` | Púrpura profundo de la pulpa pura |
-| 🟤 **Cupuaçu** | `#6B4728` | Marrón tierra de la cáscara aterciopelada |
-| 🟠 **Pupunha** | `#E65100` | Naranja fuego de la cáscara madura |
-| 🟡 **Tucumã** | `#F57C00` | Naranja azafrán de la pulpa oleosa |
-| 🟫 **Bacuri** | `#C68B23` | Amarillo dorado de la cáscara fibrosa |
-| 🟢 **Biribá** | `#7CB342` | Verde lima de la cáscara joven |
-| 🔴 **Buriti** | `#D84315` | Terracota oscuro de las escamas |
-| 🌸 **Bacaba** | `#9C5B6F` | Vino oscuro de la cáscara madura |
-| 🫒 **Patauá** | `#8B9574` | Verde grisáceo de la pulpa oleosa |
-| 🌿 **Ingá** | `#475B28` | Verde musgo oscuro de las ranuras |
-| 💛 **Taperebá** | `#FBC02D` | Amarillo solar intenso de la pulpa |
-| 🟨 **Abiu** | `#FFD600` | Amarillo brillante de la cáscara lisa |
-| 🟤 **Uxi** | `#795548` | Marrón castaño de la cáscara seca |
-| 🍋 **Araçá-boi** | `#C0CA33` | Verde amarillento de la cáscara aterciopelada |
-| 🍌 **Banana** | `#FFC107` | Amarillo yema profundo de la pulpa |
-| 🍍 **Abacaxi** | `#1B4D3E` | Verde bosque áspero de la corona |
-| 🥝 **Graviola** | `#2E4A28` | Verde hoja oscuro con espinas |
-| **Maracujá** | `#EA580C` | Naranja quemado de la cáscara |
-| 🥭 **Manga** | `#DC2626` | Rojo carmín vivo de la mejilla expuesta |
-| 🍑 **Mamão** | `#FB923C` | Naranja papaya rico de la pulpa dulce |
-| 🍉 **Melancia** | `#E11D48` | Rojo rubí vivo del corazón de la pulpa |
-Cada paleta aplica colores extraídos directamente de los tonos reales de la cáscara, pulpa y hojas de cada fruta, manteniendo contraste AA y legibilidad en modo claro y oscuro.
----
-## 📋 Descripción General
-odotoken es un reverse proxy ligero que se ubica entre tus agentes CLI de IA (Claude Code, crush, opencode, omp…) y los proveedores LLM, midiendo de forma transparente el uso de tokens y estimando costos — con control de presupuesto, un dashboard React y una API independiente de conteo de tokens.
-## ⚙️ Cómo Funciona
+# odotoken
+Proxy transparente de medición de tokens de IA entre tus agentes CLI y los proveedores LLM. Mide uso, calcula costo real y aplica límites de presupuesto.
+**v0.6.0** · 21 paletas de colores inspiradas en frutas del Acre · [Português](README.md) · [English](README.en.md)
+## Cómo funciona
 ```
-tus agentes CLI ──→ odotoken :8090 ──→ tus proxies/routers existentes ──→ proveedores LLM
-                        │
-                        ├── medición de tokens (JSON + streaming SSE)
-                        ├── cálculo de costo real (2.700+ precios de modelos)
-                        ├── guarda de presupuesto (alerta / bloqueo)
-                        └── historial de uso en SQLite
-                                │
-                     Dashboard React (/app/)
+agentes CLI → odotoken :8090 → tus proxies/routers → proveedores LLM
+│
+├─ medición (JSON + SSE)
+├─ costo real (2.700+ modelos)
+├─ guarda de presupuesto (alerta / bloqueo 429)
+└─ historial SQLite → dashboard React (/app/)
 ```
-El proxy enruta por **prefijo de path** — cada clave de proveedor en `config.json` se convierte en una ruta:
-| Path de la petición | Upstream |
-|---------------------|----------|
-| `/anthropic/v1/messages` | tu endpoint compatible con Anthropic |
-| `/openai/v1/chat/completions` | tu endpoint compatible con OpenAI |
-| `/verboo/...`, `/kodeo/...` | cualquier proveedor personalizado que configures |
-| `/v1/messages`, `/v1/chat/completions` | detección automática por formato de petición |
-El uso de tokens se extrae tanto de respuestas JSON como de streams SSE (incluyendo proveedores personalizados compatibles con OpenAI). Cada petición se registra en SQLite con tokens de prompt/completion/cache, costo calculado, latencia y código de estado.
-## ✨ Características
-- **Medición transparente** — sin cambios en el flujo de tus CLIs, solo apúntalos al proxy
-- **Precios reales** — 2.700+ modelos con tarifas por 1M de tokens de una API pública de precios y configs de routers locales
-- **Guarda de presupuesto** — límites diarios/mensuales de costo y tokens con alerta o bloqueo (HTTP 429)
-- **Dashboard React** — KPIs en vivo, gráficos, tablas ordenables, stream de eventos con diálogo de detalle por petición, temas claro/oscuro/sistema, **21 paletas de colores inspiradas en frutas del Acre**
-- **CLI** — stats en terminal (`odotoken stats --by-model`), log reciente, gestión del servicio
-- **API de conteo de tokens** — servicio independiente opcional para conteo pre-vuelo (heurística + APIs remotas de proveedores)
-- **Catálogo de modelos** — alias, ventanas de contexto, estrategias de conteo por modelo
-- **Caché con TTL** — versionada, invalidada cuando cambian catálogo/tokenizer
-- **Métricas de throughput** — TPS/TTFT por modelo, proyecto e intervalo (`GET /api/tps`, `odotoken stats --tps`, vista Throughput)
-- **Replay & optimize** — reprecificar eventos históricos con precios actuales (`odotoken replay`) y recomendaciones de modelos más baratos (`odotoken optimize`)
-- **Tags & forecast** — segmentación vía `X-Odo-Tags` y forecast lineal de costo + detección de anomalías en Overview
-- **Alertas & export** — alertas Slack/Discord/Telegram/SMTP en breach de presupuesto, límites por proyecto, export CSV (`GET /api/export?format=csv`)
-- **Runs en vivo** — `GET /api/sessions/live` lista solicitudes de modelo en curso; `X-Odo-Session` agrupa llamadas concurrentes de una conversación
-## 🚀 Instalación
-Descarga el binario de tu plataforma desde la [última versión de GitHub](https://github.com/ens-Emilio/odotoken/releases/latest), o compila desde el código fuente:
+Enrutamiento por prefijo de path: cada clave en `providers` se convierte en una ruta (`/anthropic/...`, `/openai/...`, o cualquier custom). Tokens extraídos de JSON y SSE. Cada petición registrada con tokens de prompt/completion/cache, costo, latencia y estado.
+## Instalación
+Binario listo en [Releases](https://github.com/ens-Emilio/odotoken/releases/latest), o desde fuente:
 ```bash
-git clone https://github.com/ens-Emilio/odotoken.git
-cd odotoken
-# backend (Go 1.26+)
-go build -o bin/odotoken ./cmd/odotoken
-# frontend (opcional, el dashboard viene pre-compilado en los releases)
-cd frontend && pnpm install && pnpm build && cd ..
+git clone https://github.com/ens-Emilio/odotoken.git && cd odotoken
+go build -o bin/odotoken ./cmd/odotoken # Go 1.26+
+cd frontend && pnpm install && pnpm build # opcional; los releases ya incluyen el dashboard
 ```
-## ⚡ Inicio Rápido
-### 1. Configuración
+## Configuración mínima
 ```bash
-cp config.json.example config.json  # edita upstreams / limits / sessions
+cp config.json.example config.json
 ```
-`config.json` mínimo:
 ```jsonc
 {
-  "proxy": {
-    "host": "127.0.0.1",
-    "port": 8090,
-    "upstream_openai": "https://api.openai.com",
-    "upstream_anthropic": "https://api.anthropic.com"
-  },
-  "providers": {
-    // rutas por prefijo: /<clave>/... → upstream_url
-    "anthropic": { "upstream_url": "https://api.anthropic.com" },
-    "openai": { "upstream_url": "https://api.openai.com" },
-    "mirouter": { "upstream_url": "https://mi-router.ejemplo/v1" }
-  },
-  "guard": {
-    "daily_cost_limit_usd": 10,
-    "monthly_cost_limit_usd": 100,
-    "daily_tokens_limit": 50000,
-    "monthly_tokens_limit": 500000,
-    "warning_threshold_pct": 80,
-    "action_on_breach": "block"
-  },
-  "database": { "path": "odotoken.db" }
+"proxy": { "host": "127.0.0.1", "port": 8090 },
+"providers": {
+"anthropic": { "upstream_url": "https://api.anthropic.com" },
+"openai": { "upstream_url": "https://api.openai.com" }
+},
+"guard": {
+"daily_cost_limit_usd": 10,
+"monthly_cost_limit_usd": 100,
+"action_on_breach": "block"
+},
+"database": { "path": "odotoken.db" }
 }
 ```
-Las claves de API **nunca** se almacenan en el config — tus CLIs envían sus propios headers `Authorization`/`x-api-key` y el proxy los reenvía sin tocarlos.
-### 2. Apunta tus agentes CLI al proxy
+Las claves de API nunca se guardan en el config — tus CLIs envían `Authorization`/`x-api-key` y el proxy las reenvía intactas.
+Apunta tus CLIs a `http://127.0.0.1:8090`:
 | CLI | Cómo |
 |-----|------|
 | Claude Code | `~/.claude/settings.json` → `"env": {"ANTHROPIC_BASE_URL": "http://127.0.0.1:8090"}` |
-| crush | proveedor `--base-url "http://127.0.0.1:8090/openai/v1"` |
-| opencode | proveedor `baseURL: "http://127.0.0.1:8090/<clave-de-proveedor>"` |
-| Otros | configura su base URL al proxy; usa prefijo `/<clave-de-proveedor>/` para setups multi-proveedor |
-Reinicia el CLI después de cambiar su config (las configs se cargan al arrancar).
-### 3. Ejecución
+| crush | `--base-url "http://127.0.0.1:8090/openai/v1"` |
+| opencode | `baseURL: "http://127.0.0.1:8090/<clave>"` |
 ```bash
-odotoken start              # proxy + dashboard
-# o como servicio systemd de usuario (genera el unit con rutas absolutas correctas):
-odotoken install-service
-systemctl --user daemon-reload
-systemctl --user enable --now odotoken
+odotoken start # proxy + dashboard
+# o como servicio:
+odotoken install-service && systemctl --user enable --now odotoken
 ```
-Abre **http://127.0.0.1:8090/app/** — el uso aparece en hasta 10 segundos.
-## 🎨 Seleccionando una Paleta de Colores
-En la esquina superior derecha del dashboard, junto al botón de tema (sol/luna), verás un **círculo de color** que representa la paleta activa. Haz clic para abrir el menú con las 21 opciones inspiradas en frutas del Acre:
-1. **Original** — paleta neutra por defecto (verde brand)
-2. **Açaí** 🟣 — púrpura profundo
-3. **Cupuaçu** 🟤 — marrón tierra
-4. **Pupunha** 🟠 — naranja fuego
-5. **Tucumã** 🟡 — ámbar dorado
-6. **Bacuri** 🟫 — marrón dorado
-7. **Biribá** 🟢 — verde lima
-8. **Buriti** 🔴 — terracota oscuro
-9. **Bacaba** 🌸 — vino oscuro
-10. **Patauá** 🫒 — verde grisáceo
-11. **Ingá** 🌿 — verde musgo
-12. **Taperebá** 💛 — amarillo solar
-13. **Abiu** 🟨 — amarillo brillante
-14. **Uxi** 🟤 — marrón castaño
-15. **Araçá-boi** 🍋 — verde amarillento
-16. **Banana** 🍌 — amarillo yema
-17. **Abacaxi** 🍍 — verde bosque
-18. **Graviola** 🥝 — verde hoja
-19. **Maracujá** 🧡 — naranja quemado
-20. **Manga** 🥭 — rojo carmín
-21. **Mamão** 🍑 — naranja papaya
-22. **Melancia** 🍉 — rojo rubí
-La elección se persiste en `localStorage` y se aplica instantáneamente vía variables CSS dinámicas.
-## 📖 Referencia de la CLI
+Dashboard en http://127.0.0.1:8090/app/ — el uso aparece en hasta 10s.
+## Paletas de colores
+21 paletas extraídas de los tonos reales de cáscara, pulpa y hojas de frutas nativas del Acre (Açaí, Cupuaçu, Pupunha, Tucumã, Bacuri, Biribá, Buriti, Bacaba, Patauá, Ingá, Taperebá, Abiu, Uxi, Araçá-boi, Banana, Abacaxi, Graviola, Maracujá, Manga, Mamão, Melancia). Selector en el header del dashboard (círculo de color junto al tema), persistido en `localStorage`, contraste AA en modos claro y oscuro.
+## Funcionalidades
+- Medición transparente — cero cambios en el flujo de los CLIs
+- Precios reales — 2.700+ modelos, sync vía `node scripts/sync-prices.mjs`
+- Guarda de presupuesto — límites diarios/mensuales de costo y tokens, alerta o bloqueo (429)
+- Dashboard React — KPIs, gráficos, tablas ordenables, stream de eventos, temas claro/oscuro/sistema
+- CLI — `odotoken stats --by-model`, `log`, `count`, `models`, `sessions`
+- API de conteo standalone — `odotoken serve` en puerto 8081
+- Throughput — TPS/TTFT por modelo (`GET /api/tps`)
+- Replay & optimize — repricing histórico, sugiere modelos más baratos
+- Tags & forecast — `X-Odo-Tags`, forecast lineal + detección de anomalías
+- Alertas — Slack/Discord/Telegram/SMTP en breach; export CSV/SVG
+- Runs en vivo — `GET /api/sessions/live`; `X-Odo-Session` agrupa llamadas de una conversación
+- Import de sesiones locales — `odotoken sessions import` lee OMP/Claude/Codex/Crush ya guardados en disco
+## CLI
 ```bash
-odotoken start [--host] [--port] [--reload]   # inicia proxy + dashboard
-odotoken serve [--port 8081]                  # API independiente de conteo
-odotoken status                               # verifica servicio/puerto
-odotoken stats [--by-model] [--by-client] [--since ISO-DATE] [--days N]
-odotoken log [--limit 20]                     # log de peticiones recientes
-odotoken count text "hola" [--model X] [--output json]
-odotoken count chat --file mensajes.json      # array JSON de mensajes
+odotoken start [--host] [--port] [--reload]
+odotoken serve [--port 8081]
+odotoken status
+odotoken stats [--by-model] [--by-client] [--since ISO] [--days N] [--tps]
+odotoken log [--limit 20]
+odotoken count text "..." [--model X] [--output json]
+odotoken count chat --file msgs.json
 odotoken count batch requests.jsonl
-odotoken models list [--provider X]
-odotoken models info <id-de-modelo>
-odotoken sessions scan [--since ISO-DATE]     # solo lectura: qué CLIs existen aquí
-odotoken sessions import [--dry-run] [--cli omp|claude|codex|crush] [--since ISO-DATE]
-odotoken sessions stats [--since ISO-DATE] [--by-cli] [--by-model] [--by-project]
+odotoken models list | info <id>
+odotoken sessions scan | import [--dry-run] [--cli omp|claude|codex|crush] [--since ISO] | stats
+odotoken replay
+odotoken optimize
 ```
-## 🌐 API HTTP
-Endpoints del proxy (mismo puerto que el dashboard):
+## HTTP API
+Proxy (puerto 8090):
+```
+GET /health
+GET /api/stats?since=ISO&project=&source=&tag=&tz=
+GET /api/guard/status
+GET /api/filters
+GET /api/tps
+GET /api/sessions/live
+GET /api/export?format=csv
+GET /api/stats.svg
+GET /metrics
+```
+Conteo standalone (puerto 8081):
+```
+POST /v1/count {"model","text"}
+POST /v1/count/batch {"items":[...]}
+GET /v1/models
+GET /health | /ready | /metrics
+```
+## Configuración
+| Clave | Descripción | Por defecto |
+|-------|-------------|-------------|
+| `proxy.host` / `proxy.port` | bind | `127.0.0.1:8090` |
+| `providers.<k>.upstream_url` | upstream de la ruta por prefijo | — |
+| `proxy.upstream_openai` / `upstream_anthropic` | fallback para peticiones auto-detectadas | APIs oficiales |
+| `guard.daily_cost_limit_usd` / `monthly_cost_limit_usd` | límites de costo (0 = off) | `null` |
+| `guard.daily_tokens_limit` / `monthly_tokens_limit` | límites de tokens (0 = off) | `null` |
+| `guard.warning_threshold_pct` | % para warning | `80` |
+| `guard.action_on_breach` | `alert` o `block` (429) | `block` |
+| `guard.timezone` | zona IANA de los límites | UTC |
+| `limits.webhook_url` | webhook en warning/breach | `null` |
+| `database.path` | SQLite WAL | `odotoken.db` |
+| `token_counter.enabled` | middleware pre-vuelo | `true` |
+| `sessions.enabled` / `sessions.paths` | import local | `true` |
+Overrides de precio: `"override": true` en una entrada de `prices.json` impide que el sync la sobrescriba.
+## Troubleshooting
+Todos los CLIs fallan con `ECONNREFUSED 127.0.0.1:8090` → el proxy cayó, no los providers.
 ```bash
-curl http://127.0.0.1:8090/health
-curl http://127.0.0.1:8090/api/stats?since=2026-10-01T00:00:00
-curl http://127.0.0.1:8090/api/guard/status
-curl http://127.0.0.1:8090/api/filters
-curl http://127.0.0.1:8090/api/stats.csv
-curl http://127.0.0.1:8090/api/stats.svg
-```
-API de conteo de tokens (`odotoken serve`, puerto 8081):
-```bash
-curl -X POST http://127.0.0.1:8081/v1/count \
-  -H "Content-Type: application/json" \
-  -d '{"model": "gpt-4o-mini", "text": "Hola mundo"}'
-curl -X POST http://127.0.0.1:8081/v1/count/batch -d '{"items": [...]}'
-curl http://127.0.0.1:8081/v1/models
-curl http://127.0.0.1:8081/health      # + /ready, /metrics
-```
-## 💰 Precios de Modelos
-El cálculo de costos usa `prices.json` — **2.700+ modelos** con tarifas reales por 1M de tokens en USD, sincronizadas de dos fuentes (la última gana):
-| Fuente | Cobertura | Prioridad |
-|--------|-----------|-----------|
-| API de precios (por defecto `http://154.29.76.173`, sobrescribe con `PEGASUS_PRICING_API`) | 3.500+ modelos, REST pública | 1 |
-| Configs de routers (`~/.local/share/crush/providers.json`, si existe) | precios exactos que cobran tus routers locales | 2 (gana) |
-Actualiza los precios cuando quieras:
-```bash
-node scripts/sync-prices.mjs
-systemctl --user restart odotoken
-```
-Overrides manuales: agrega `"override": true` en cualquier entrada y el script de sync nunca la tocará:
-```json
-"mi-modelo-custom": { "input": 1.5, "output": 6.0, "cache_read": 0.2, "cache_write": 0, "override": true }
-```
-La API pública de precios no necesita clave para lecturas (rate limit: 10 req/s por IP en nginx, 60 req/min en la app). Despliega tu propia instancia y apunta `PEGASUS_PRICING_API` a ella si lo prefieres.
-## 📥 Importando Sesiones Locales
-Usa odotoken para leer sesiones ya guardadas en la máquina (sin proxy) y tarificar con `prices.json`:
-```bash
-odotoken sessions scan                        # qué CLIs/archivos se encontraron (solo lectura)
-odotoken sessions import --dry-run            # cuenta tokens + costo sin escribir
-odotoken sessions import                      # importa en SQLite (idempotente, con dedup)
-odotoken sessions import --since 2026-10-01   # incremental
-odotoken sessions stats --by-cli --by-model   # desglose por origen
-```
-| CLI | Origen | Qué se lee |
-|-----|--------|-----------|
-| OMP | `~/.omp/stats.db` | SQLite `messages` |
-| Claude Code | `~/.claude/projects/**/*.jsonl` | JSONL `type=assistant` → `message.usage` |
-| Codex | `~/.codex/sessions/**` | `token_usage_record` → `payload.usage` |
-| Crush | `~/.local/share/crush/projects.json` → `data_dir/**/*.jsonl` | JSONL `usage` (best-effort) |
-- **Precio único** — toda fila importada se recalcula por `PricingCalculator` (`prices.json`).
-- **Dedup** — `UNIQUE(source, session_file, entry_id)`; reejecutar `import` inserta `0`.
-- **Dashboard** — filtro **Source** en header, `GET /api/stats?source=...`, `POST /api/sessions/import` y tarjeta **By Source**.
-## ⚙️ Referencia de Configuración
-| Setting | Descripción | Por defecto |
-|---------|-------------|-------------|
-| `proxy.host` / `proxy.port` | dirección de bind | `127.0.0.1:8090` |
-| `providers.<clave>.upstream_url` | upstream de la ruta por prefijo | — |
-| `proxy.upstream_openai` / `upstream_anthropic` | upstreams de fallback para peticiones detectadas automáticamente | APIs oficiales |
-| `guard.daily_cost_limit_usd` / `guard.monthly_cost_limit_usd` | límites diarios/mensuales de costo (0 = desactivado) | `null` |
-| `guard.daily_tokens_limit` / `guard.monthly_tokens_limit` | límites diarios/mensuales de tokens (0 = desactivado) | `null` |
-| `guard.warning_threshold_pct` | porcentaje en que la guarda pasa de ok a warning | `80` |
-| `guard.action_on_breach` | `alert` sigue atendiendo y envía alertas; `block` rechaza solicitudes excedidas con HTTP 429 | `block` |
-| `guard.timezone` | zona IANA usada en los límites diario y mensual | UTC |
-| `limits.webhook_url` | webhook notificado en `warning`/`breached` | `null` |
-| `database.path` | archivo SQLite (modo WAL) | `odotoken.db` |
-| `token_counter.enabled` | middleware de conteo pre-vuelo en el proxy | `true` |
-| `sessions.enabled` / `sessions.paths` | importación de sesiones locales (claude/codex/omp/crush) | `true` / `~/.claude/...` |
-## 🏷️ Etiquetas de Proyecto, Shadow Pricing y Privacidad
-- **Etiquetas de proyecto** — envía `X-Odo-Project: <nombre>` (o `X-Project`) en cualquier petición; costos segmentados por proyecto en el dashboard, `/api/stats?project=<id>` y `odotoken stats --by-project`.
-- **Runs en vivo** — `GET /api/sessions/live` lista solicitudes de modelo en curso. Envía `X-Odo-Session: <conversation-id>` para agrupar llamadas concurrentes de una conversación; cada solicitud mantiene su propio `run_id`.
-- **Shadow pricing** — modelos locales (precio cero) reciben un `shadow_cost` calculado a partir del equivalente cloud elegido por `getCloudEquivalent` (`internal/pricing/calculator.go`); el dashboard muestra el KPI "Saved vs Cloud" cuando hay ahorro.
-- **Privacidad** — odotoken almacena metadatos de uso, no el contenido de prompts ni respuestas. Los mensajes importados nunca se procesan: el proxy registra tokens, tiempos, modelo, proyecto y tags. Actualmente no hay redactor de PII; no trates la base como datos anonimizados.
-- **Prometheus** — `GET /metrics` en el puerto del proxy sirve métricas en text format; importa `examples/grafana-dashboard.json` o ejecuta `docker compose -f examples/docker-compose.observability.yml up -d`.
-- **Mock y caos** — define el upstream de un proveedor como `mock://local` para respuestas sintéticas (sin red, con medición). Activa `chaos: {enabled: true, rate: 0.05, errors: [429,500], latency_ms: 3000}` para probar resiliencia del cliente; `X-Odo-No-Chaos: true` lo desvía.
-## 🔧 Solución de Problemas
-**Todos los CLIs fallan a la vez con `ECONNREFUSED 127.0.0.1:8090`** — el proxy se cayó, no tus proveedores. Triaje rápido:
-```bash
-odotoken status          # verifica el unit de systemd Y el puerto
+odotoken status
 curl http://127.0.0.1:8090/health
 journalctl --user -u odotoken -n 50 --no-pager
 ```
-| Síntoma | Significado | Corrección |
-|---------|-------------|------------|
-| `status=203/EXEC` en journal | la ruta del `ExecStart` del unit no existe (proyecto movido/clonado en otro lugar) | ejecuta `odotoken install-service` en la raíz del proyecto |
-| `activating (auto-restart)` para siempre | servicio en loop de crash — mira el motivo en el journal | corrige la causa, luego `systemctl --user restart odotoken` |
-| nada en :8090, servicio inactive | nunca se inició | `systemctl --user enable --now odotoken` |
-| `/health` responde pero los CLIs fallan | el proxy está bien — las configs de los CLIs están desactualizadas | reinicia el CLI (las configs cargan al arrancar) |
-**Regla de triaje**: si el error tiene status HTTP (ej. 503 del proveedor), el proxy entregó la petición y el problema está más arriba. Si es un error de conexión sin ningún status (`ECONNREFUSED`, "Unable to connect"), el problema es el propio proxy.
-## 🔒 Notas de Seguridad
-- **Un solo proceso** — SQLite y la caché en memoria asumen un worker. Ejecuta `odotoken start` sin `--workers` (por defecto 1); multi-worker dividiría la medición entre procesos sin estado compartido.
-- El proxy hace bind en `127.0.0.1` por defecto — solo local
-- Las claves de API pasan en los headers; **nada se registra ni almacena** — solo conteos de tokens, nombres de modelos, nombre del app cliente (del User-Agent), costo y latencia
-- Colócalo detrás de autenticación/reverse-proxy antes de exponerlo en red
-## 🛠️ Desarrollo
+- `status=203/EXEC` → `ExecStart` apunta a path inexistente; ejecuta `odotoken install-service` desde la raíz del proyecto
+- `activating (auto-restart)` loop → lee el journal, corrige la causa, `systemctl --user restart odotoken`
+- `/health` OK pero los CLIs fallan → configs de los CLIs stale; reinicia el CLI
+Regla: error con estado HTTP (503 etc.) → problema upstream. Error de conexión sin estado → el proxy cayó.
+## Seguridad
+- Proceso único — SQLite + caché en memoria asumen 1 worker
+- Bind en `127.0.0.1` por defecto
+- Las claves pasan en los headers; nada se registra más allá de tokens, modelo, cliente, costo y latencia
+- Colócalo detrás de auth/reverse-proxy antes de exponerlo en red
+## Desarrollo
 ```bash
-make build                                 # compila ./cmd/odotoken → bin/odotoken
-make test                                  # go test -race ./...
-cd frontend && pnpm install && pnpm build   # compila el dashboard → internal/server/static/
+make build
+make test
+cd frontend && pnpm install && pnpm build
 ```
-## 📄 Licencia
+## Licencia
 GPL-3.0-or-later. Ver [LICENSE](LICENSE).
-## 🤝 Contribuir
-Los PR son bienvenidos — ejecuta la suite de tests y regenera `prices.json` vía el script de sync en lugar de editarlo a mano (excepto entradas con `"override": true`).
----
-**Hecho con 🌿 en Acre, Brasil** — donde la selva inspira hasta los colores del código.
