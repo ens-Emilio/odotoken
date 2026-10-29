@@ -28,8 +28,8 @@ config.json
 !config.json.example
 
 # Compiled binaries (Go build output)
-odotoken
-bin/
+/odotoken
+/bin/
 
 # Go test coverage output (make test)
 coverage.out
