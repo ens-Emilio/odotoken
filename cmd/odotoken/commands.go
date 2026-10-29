@@ -388,14 +388,3 @@ func writeJSON(v interface{}) error {
 	enc.SetIndent("", "  ")
 	return enc.Encode(v)
 }
-
-func parseTimestamp(ts string) time.Time {
-	if ts == "" {
-		return time.Now().UTC()
-	}
-	t, err := time.Parse(time.RFC3339, ts)
-	if err != nil {
-		return time.Now().UTC()
-	}
-	return t
-}
