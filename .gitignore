@@ -30,3 +30,7 @@ config.json
 # Compiled binaries (Go build output)
 odotoken
 bin/
+
+# Go test coverage output (make test)
+coverage.out
+coverage.html

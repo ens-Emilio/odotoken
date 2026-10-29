@@ -86,13 +86,13 @@ func handleCount(w http.ResponseWriter, r *http.Request, cfg config.Config, calc
 	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20))
 	dec.UseNumber()
 	if err := dec.Decode(&raw); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON"})
+		writeAPIError(w, http.StatusBadRequest, "error.request.invalidJson", "invalid JSON")
 		return
 	}
 
 	model, _ := raw["model"].(string)
 	if model == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "model is required"})
+		writeAPIError(w, http.StatusBadRequest, "error.count.modelRequired", "model is required")
 		return
 	}
 
@@ -130,7 +130,7 @@ func handleCount(w http.ResponseWriter, r *http.Request, cfg config.Config, calc
 func handleBatchCount(w http.ResponseWriter, r *http.Request, cfg config.Config, calc *pricing.Calculator) {
 	var req BatchCountRequest
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 10<<20)).Decode(&req); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON"})
+		writeAPIError(w, http.StatusBadRequest, "error.request.invalidJson", "invalid JSON")
 		return
 	}
 
@@ -176,6 +176,22 @@ func countTokens(model, text string, cfg config.Config) int {
 		h.CharsPerToken = 4.0
 	}
 	return int(float64(len(text)) / h.CharsPerToken)
+}
+
+type apiError struct {
+	Error  string            `json:"error"`
+	Code   string            `json:"code"`
+	Params map[string]string `json:"params,omitempty"`
+}
+
+func writeAPIError(w http.ResponseWriter, status int, code, message string) {
+	writeJSON(w, status, apiError{Error: message, Code: code})
+}
+
+// writeAPIErrorField carries the offending field name, so the UI can render
+// "{field} must be a number" without parsing English prose.
+func writeAPIErrorField(w http.ResponseWriter, status int, code, field, message string) {
+	writeJSON(w, status, apiError{Error: message, Code: code, Params: map[string]string{"field": field}})
 }
 
 func writeJSON(w http.ResponseWriter, status int, v interface{}) {

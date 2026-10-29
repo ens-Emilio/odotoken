@@ -7,7 +7,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var version = "0.5.0"
+var version = "0.7.0"
 
 func main() {
 	rootCmd := &cobra.Command{
@@ -18,8 +18,7 @@ enforces budget limits, and provides detailed usage analytics.`,
 		Version: version,
 	}
 
-	// Add subcommands (will be implemented in Phase 7)
-	// Add subcommands
+	// Subcommands are registered in commands.go.
 	rootCmd.AddCommand(
 		newStartCmd(),
 		newStopCmd(),

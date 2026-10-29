@@ -1,6 +1,7 @@
 package guard
 
 import (
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"net"
@@ -100,21 +101,37 @@ func (g *Guard) Check(projectID string) domain.GuardCheckResult {
 		warnPct = 80.0
 	}
 
-	// Cost limits
+	// Cost limits. Each branch records a stable code plus its numbers, because
+	// the dashboard must render the reason in the reader's language; Message
+	// stays English for logs and alert payloads, which no UI reads.
+	reason := func(code, message string, params map[string]string) {
+		result.ReasonCode = code
+		result.ReasonParams = params
+		result.Message = message
+	}
+
 	if limits.DailyCostLimitUSD > 0 && summary.DailyCostUSD >= limits.DailyCostLimitUSD {
 		result.Allowed = false
 		result.Status = "breached"
-		result.Message = fmt.Sprintf("daily cost limit breached: $%.4f / $%.2f", summary.DailyCostUSD, limits.DailyCostLimitUSD)
+		reason("guard.dailyCostBreached",
+			fmt.Sprintf("daily cost limit breached: $%.4f / $%.2f", summary.DailyCostUSD, limits.DailyCostLimitUSD),
+			costParams(summary.DailyCostUSD, limits.DailyCostLimitUSD, 0))
 	} else if limits.MonthlyCostLimitUSD > 0 && summary.MonthlyCostUSD >= limits.MonthlyCostLimitUSD {
 		result.Allowed = false
 		result.Status = "breached"
-		result.Message = fmt.Sprintf("monthly cost limit breached: $%.4f / $%.2f", summary.MonthlyCostUSD, limits.MonthlyCostLimitUSD)
+		reason("guard.monthlyCostBreached",
+			fmt.Sprintf("monthly cost limit breached: $%.4f / $%.2f", summary.MonthlyCostUSD, limits.MonthlyCostLimitUSD),
+			costParams(summary.MonthlyCostUSD, limits.MonthlyCostLimitUSD, 0))
 	} else if limits.DailyCostLimitUSD > 0 && summary.DailyCostUSD >= limits.DailyCostLimitUSD*warnPct/100 {
 		result.Status = "warning"
-		result.Message = fmt.Sprintf("daily cost warning: $%.4f / $%.2f (%.0f%%)", summary.DailyCostUSD, limits.DailyCostLimitUSD, warnPct)
+		reason("guard.dailyCostWarning",
+			fmt.Sprintf("daily cost warning: $%.4f / $%.2f (%.0f%%)", summary.DailyCostUSD, limits.DailyCostLimitUSD, warnPct),
+			costParams(summary.DailyCostUSD, limits.DailyCostLimitUSD, warnPct))
 	} else if limits.MonthlyCostLimitUSD > 0 && summary.MonthlyCostUSD >= limits.MonthlyCostLimitUSD*warnPct/100 {
 		result.Status = "warning"
-		result.Message = fmt.Sprintf("monthly cost warning: $%.4f / $%.2f (%.0f%%)", summary.MonthlyCostUSD, limits.MonthlyCostLimitUSD, warnPct)
+		reason("guard.monthlyCostWarning",
+			fmt.Sprintf("monthly cost warning: $%.4f / $%.2f (%.0f%%)", summary.MonthlyCostUSD, limits.MonthlyCostLimitUSD, warnPct),
+			costParams(summary.MonthlyCostUSD, limits.MonthlyCostLimitUSD, warnPct))
 	}
 
 	// Token limits (only if not already breached by cost)
@@ -122,20 +139,27 @@ func (g *Guard) Check(projectID string) domain.GuardCheckResult {
 		if limits.DailyTokenLimit > 0 && summary.DailyTokens >= limits.DailyTokenLimit {
 			result.Allowed = false
 			result.Status = "breached"
-			result.Message = fmt.Sprintf("daily token limit breached: %d / %d", summary.DailyTokens, limits.DailyTokenLimit)
+			reason("guard.dailyTokensBreached",
+				fmt.Sprintf("daily token limit breached: %d / %d", summary.DailyTokens, limits.DailyTokenLimit),
+				tokenParams(summary.DailyTokens, limits.DailyTokenLimit, 0))
 		} else if limits.MonthlyTokenLimit > 0 && summary.MonthlyTokens >= limits.MonthlyTokenLimit {
 			result.Allowed = false
 			result.Status = "breached"
-			result.Message = fmt.Sprintf("monthly token limit breached: %d / %d", summary.MonthlyTokens, limits.MonthlyTokenLimit)
+			reason("guard.monthlyTokensBreached",
+				fmt.Sprintf("monthly token limit breached: %d / %d", summary.MonthlyTokens, limits.MonthlyTokenLimit),
+				tokenParams(summary.MonthlyTokens, limits.MonthlyTokenLimit, 0))
 		} else if limits.DailyTokenLimit > 0 && float64(summary.DailyTokens) >= float64(limits.DailyTokenLimit)*warnPct/100 {
 			result.Status = "warning"
-			result.Message = fmt.Sprintf("daily token warning: %d / %d (%.0f%%)", summary.DailyTokens, limits.DailyTokenLimit, warnPct)
+			reason("guard.dailyTokensWarning",
+				fmt.Sprintf("daily token warning: %d / %d (%.0f%%)", summary.DailyTokens, limits.DailyTokenLimit, warnPct),
+				tokenParams(summary.DailyTokens, limits.DailyTokenLimit, warnPct))
 		} else if limits.MonthlyTokenLimit > 0 && float64(summary.MonthlyTokens) >= float64(limits.MonthlyTokenLimit)*warnPct/100 {
 			result.Status = "warning"
-			result.Message = fmt.Sprintf("monthly token warning: %d / %d (%.0f%%)", summary.MonthlyTokens, limits.MonthlyTokenLimit, warnPct)
+			reason("guard.monthlyTokensWarning",
+				fmt.Sprintf("monthly token warning: %d / %d (%.0f%%)", summary.MonthlyTokens, limits.MonthlyTokenLimit, warnPct),
+				tokenParams(summary.MonthlyTokens, limits.MonthlyTokenLimit, warnPct))
 		}
 	}
-
 	if result.Status == "breached" {
 		result.Allowed = result.ActionOnBreach != "block"
 	}
@@ -151,6 +175,8 @@ func (g *Guard) Check(projectID string) domain.GuardCheckResult {
 				Timestamp:      time.Now().UTC().Format(time.RFC3339Nano),
 				Status:         result.Status,
 				Message:        result.Message,
+				MessageCode:    result.ReasonCode,
+				MessageParams:  marshalParams(result.ReasonParams),
 				Action:         result.ActionOnBreach,
 				DailyCostUSD:   result.CurrentDailyCost,
 				MonthlyCostUSD: result.CurrentMonthlyCost,
@@ -168,6 +194,35 @@ func (g *Guard) Check(projectID string) domain.GuardCheckResult {
 	}
 
 	return result
+}
+
+func costParams(used, limit, pct float64) map[string]string {
+	return map[string]string{
+		"used":  fmt.Sprintf("$%.2f", used),
+		"limit": fmt.Sprintf("$%.2f", limit),
+		"pct":   fmt.Sprintf("%.0f%%", pct),
+	}
+}
+
+func tokenParams(used, limit int, pct float64) map[string]string {
+	return map[string]string{
+		"used":  strconv.Itoa(used),
+		"limit": strconv.Itoa(limit),
+		"pct":   fmt.Sprintf("%.0f%%", pct),
+	}
+}
+
+// marshalParams stores reason parameters as JSON so the dashboard can rebuild
+// the sentence in the reader's language long after the transition happened.
+func marshalParams(params map[string]string) string {
+	if len(params) == 0 {
+		return "{}"
+	}
+	encoded, err := json.Marshal(params)
+	if err != nil {
+		return "{}"
+	}
+	return string(encoded)
 }
 
 func (g *Guard) dispatchAlerts(result domain.GuardCheckResult) {

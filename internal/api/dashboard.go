@@ -14,6 +14,7 @@ import (
 	"github.com/ens-Emilio/odotoken/internal/config"
 	"github.com/ens-Emilio/odotoken/internal/db"
 	"github.com/ens-Emilio/odotoken/internal/domain"
+	"github.com/ens-Emilio/odotoken/internal/importers"
 	"github.com/go-chi/chi/v5"
 )
 
@@ -24,8 +25,9 @@ func DashboardRouter(
 	limits func() config.GuardConfig,
 	updateLimits func(config.GuardConfig),
 	configPath string,
+	engine *importers.Engine,
 ) chi.Router {
-	return dashboardRouter(database, guardChecker, limits, updateLimits, configPath)
+	return dashboardRouter(database, guardChecker, limits, updateLimits, configPath, engine)
 }
 
 func dashboardRouter(
@@ -34,8 +36,13 @@ func dashboardRouter(
 	getLimits func() config.GuardConfig,
 	updateLimits func(config.GuardConfig),
 	configPath string,
+	engine *importers.Engine,
 ) chi.Router {
 	r := chi.NewRouter()
+
+	if engine != nil {
+		registerImportRoutes(r, database, engine, configPath)
+	}
 	limitsView := func(v config.GuardConfig) map[string]interface{} {
 		limit := func(value float64) interface{} {
 			if value == 0 {
@@ -86,12 +93,14 @@ func dashboardRouter(
 		status["status"] = res.Status
 		status["allowed"] = res.Allowed
 		status["reason"] = res.Message
+		status["reason_code"] = res.ReasonCode
+		status["reason_params"] = res.ReasonParams
 		return status
 	}
 
 	r.Get("/guard/limits", func(w http.ResponseWriter, r *http.Request) {
 		if getLimits == nil {
-			writeJSON(w, http.StatusNotFound, map[string]string{"error": "guard unavailable"})
+			writeAPIError(w, http.StatusNotFound, "error.guard.unavailable", "guard unavailable")
 			return
 		}
 		writeJSON(w, http.StatusOK, limitsView(getLimits()))
@@ -107,30 +116,32 @@ func dashboardRouter(
 		res := guardChecker(r.URL.Query().Get("project"))
 		events, err := database.RecentGuardEvents(20)
 		if err != nil {
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "guard history unavailable"})
+			writeAPIError(w, http.StatusInternalServerError, "error.guard.history", "guard history unavailable")
 			return
 		}
 		if events == nil {
 			events = []db.GuardEvent{}
 		}
 		writeJSON(w, http.StatusOK, map[string]interface{}{
-			"status":  res.Status,
-			"allowed": res.Allowed,
-			"reason":  res.Message,
-			"history": events,
+			"status":        res.Status,
+			"allowed":       res.Allowed,
+			"reason":        res.Message,
+			"reason_code":   res.ReasonCode,
+			"reason_params": res.ReasonParams,
+			"history":       events,
 		})
 	})
 
 	r.Patch("/guard/limits", func(w http.ResponseWriter, r *http.Request) {
 		if getLimits == nil || updateLimits == nil {
-			writeJSON(w, http.StatusNotFound, map[string]string{"error": "guard unavailable"})
+			writeAPIError(w, http.StatusNotFound, "error.guard.unavailable", "guard unavailable")
 			return
 		}
 		var raw map[string]json.RawMessage
 		dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20))
 		dec.DisallowUnknownFields()
 		if err := dec.Decode(&raw); err != nil {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON"})
+			writeAPIError(w, http.StatusBadRequest, "error.request.invalidJson", "invalid JSON")
 			return
 		}
 		limits := getLimits()
@@ -139,60 +150,60 @@ func dashboardRouter(
 			case "daily_cost_limit_usd":
 				v, ok := decodeLimitFloat(value)
 				if !ok {
-					writeJSON(w, http.StatusBadRequest, map[string]string{"error": "daily_cost_limit_usd must be a number or null"})
+					writeAPIErrorField(w, http.StatusBadRequest, "error.guard.fieldNumber", "daily_cost_limit_usd", "daily_cost_limit_usd must be a number or null")
 					return
 				}
 				limits.DailyCostLimitUSD = v
 			case "monthly_cost_limit_usd":
 				v, ok := decodeLimitFloat(value)
 				if !ok {
-					writeJSON(w, http.StatusBadRequest, map[string]string{"error": "monthly_cost_limit_usd must be a number or null"})
+					writeAPIErrorField(w, http.StatusBadRequest, "error.guard.fieldNumber", "monthly_cost_limit_usd", "monthly_cost_limit_usd must be a number or null")
 					return
 				}
 				limits.MonthlyCostLimitUSD = v
 			case "daily_tokens_limit":
 				v, ok := decodeLimitInt(value)
 				if !ok {
-					writeJSON(w, http.StatusBadRequest, map[string]string{"error": "daily_tokens_limit must be an integer or null"})
+					writeAPIErrorField(w, http.StatusBadRequest, "error.guard.fieldInteger", "daily_tokens_limit", "daily_tokens_limit must be an integer or null")
 					return
 				}
 				limits.DailyTokenLimit = v
 			case "monthly_tokens_limit":
 				v, ok := decodeLimitInt(value)
 				if !ok {
-					writeJSON(w, http.StatusBadRequest, map[string]string{"error": "monthly_tokens_limit must be an integer or null"})
+					writeAPIErrorField(w, http.StatusBadRequest, "error.guard.fieldInteger", "monthly_tokens_limit", "monthly_tokens_limit must be an integer or null")
 					return
 				}
 				limits.MonthlyTokenLimit = v
 			case "warning_threshold_pct":
 				v, ok := decodeLimitFloat(value)
 				if !ok {
-					writeJSON(w, http.StatusBadRequest, map[string]string{"error": "warning_threshold_pct must be a number or null"})
+					writeAPIErrorField(w, http.StatusBadRequest, "error.guard.fieldNumber", "warning_threshold_pct", "warning_threshold_pct must be a number or null")
 					return
 				}
 				limits.WarningThresholdPct = v
 			case "action_on_breach":
 				v, ok := decodeOptionalString(value)
 				if !ok {
-					writeJSON(w, http.StatusBadRequest, map[string]string{"error": "action_on_breach must be alert or block"})
+					writeAPIError(w, http.StatusBadRequest, "error.guard.action", "action_on_breach must be alert or block")
 					return
 				}
 				limits.ActionOnBreach = v
 			case "timezone":
 				v, ok := decodeOptionalString(value)
 				if !ok {
-					writeJSON(w, http.StatusBadRequest, map[string]string{"error": "timezone must be an IANA timezone string"})
+					writeAPIError(w, http.StatusBadRequest, "error.guard.timezone", "timezone must be an IANA timezone string")
 					return
 				}
 				if v != "" {
 					if _, err := time.LoadLocation(v); err != nil {
-						writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid timezone"})
+						writeAPIError(w, http.StatusBadRequest, "error.guard.timezone", "invalid timezone")
 						return
 					}
 				}
 				limits.Timezone = v
 			default:
-				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "unknown guard limit field"})
+				writeAPIError(w, http.StatusBadRequest, "error.guard.unknownField", "unknown guard limit field")
 				return
 			}
 		}
@@ -200,18 +211,18 @@ func dashboardRouter(
 			limits.ActionOnBreach = "block"
 		}
 		if limits.ActionOnBreach != "alert" && limits.ActionOnBreach != "block" {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "action_on_breach must be alert or block"})
+			writeAPIError(w, http.StatusBadRequest, "error.guard.action", "action_on_breach must be alert or block")
 			return
 		}
 		if limits.DailyCostLimitUSD < 0 || limits.MonthlyCostLimitUSD < 0 ||
 			limits.DailyTokenLimit < 0 || limits.MonthlyTokenLimit < 0 ||
 			limits.WarningThresholdPct < 0 || limits.WarningThresholdPct > 100 {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "limits must be non-negative and warning threshold must be 0..100"})
+			writeAPIError(w, http.StatusBadRequest, "error.guard.range", "limits must be non-negative and warning threshold must be 0..100")
 			return
 		}
 		if configPath != "" {
 			if err := persistGuardLimits(configPath, limits); err != nil {
-				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": fmt.Sprintf("persist limits: %v", err)})
+				writeAPIError(w, http.StatusInternalServerError, "error.guard.persist", fmt.Sprintf("persist limits: %v", err))
 				return
 			}
 		}
@@ -227,7 +238,7 @@ func dashboardRouter(
 		sources, sourceErr := database.GetSummaryBySource(since, project)
 		tags, tagErr := database.GetSummaryByTag(since, project, source)
 		if projectErr != nil || sourceErr != nil || tagErr != nil {
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "filter options unavailable"})
+			writeAPIError(w, http.StatusInternalServerError, "error.filters.unavailable", "filter options unavailable")
 			return
 		}
 		if projects == nil {
@@ -256,7 +267,7 @@ func dashboardRouter(
 		// the dashboard look healthy while every metric was fabricated.
 		summary, err := database.GetSummary(since, project, source, tag)
 		if err != nil {
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "stats unavailable"})
+			writeAPIError(w, http.StatusInternalServerError, "error.stats.unavailable", "stats unavailable")
 			return
 		}
 		// A failure in any partition must be visible, matching the summary
@@ -419,7 +430,7 @@ func dashboardRouter(
 		// completion tokens as total_tokens hid prompt and cache usage.
 		liveTPS, err := database.GetLiveTPS(10)
 		if err != nil {
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "stats unavailable"})
+			writeAPIError(w, http.StatusInternalServerError, "error.stats.unavailable", "stats unavailable")
 			return
 		}
 		tpsMap := map[string]interface{}{
@@ -477,7 +488,7 @@ func dashboardRouter(
 	r.Get("/stats/daily-detail", func(w http.ResponseWriter, r *http.Request) {
 		day := r.URL.Query().Get("day")
 		if day == "" {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "day is required (YYYY-MM-DD)"})
+			writeAPIError(w, http.StatusBadRequest, "error.stats.dayRequired", "day is required (YYYY-MM-DD)")
 			return
 		}
 		tz := r.URL.Query().Get("tz")
@@ -487,7 +498,7 @@ func dashboardRouter(
 
 		summary, byClient, bySource, err := database.GetDailyDetail(day, tz, project, source, tag)
 		if err != nil {
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": fmt.Sprintf("daily detail unavailable: %v", err)})
+			writeAPIError(w, http.StatusInternalServerError, "error.stats.detailUnavailable", fmt.Sprintf("daily detail unavailable: %v", err))
 			return
 		}
 
@@ -535,7 +546,7 @@ func dashboardRouter(
 		tag := r.URL.Query().Get("tag")
 		summary, err := database.GetSummary(since, project, source, tag)
 		if err != nil {
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "stats unavailable"})
+			writeAPIError(w, http.StatusInternalServerError, "error.stats.unavailable", "stats unavailable")
 			return
 		}
 		w.Header().Set("Content-Type", "text/csv; charset=utf-8")
@@ -554,28 +565,31 @@ func dashboardRouter(
 		tag := r.URL.Query().Get("tag")
 		summary, err := database.GetSummary(since, project, source, tag)
 		if err != nil {
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "stats unavailable"})
+			writeAPIError(w, http.StatusInternalServerError, "error.stats.unavailable", "stats unavailable")
 			return
 		}
 		w.Header().Set("Content-Type", "image/svg+xml; charset=utf-8")
 		w.Header().Set("Content-Disposition", `attachment; filename="odotoken-stats.svg"`)
-		svg := fmt.Sprintf(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 360" role="img" aria-label="odotoken usage snapshot">
+		labels := svgLabelsFor(r.URL.Query().Get("lang"))
+		svg := fmt.Sprintf(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 360" role="img" aria-label="%s">
 <rect width="800" height="360" fill="#ffffff"/>
-<text x="32" y="48" font-family="system-ui,sans-serif" font-size="24" font-weight="700" fill="#111827">odotoken usage snapshot</text>
+<text x="32" y="48" font-family="system-ui,sans-serif" font-size="24" font-weight="700" fill="#111827">%s</text>
 <text x="32" y="76" font-family="system-ui,sans-serif" font-size="12" fill="#6b7280">%s · %s · %s</text>
 <g font-family="system-ui,sans-serif" fill="#111827">
-<text x="32" y="130" font-size="13" fill="#6b7280">REQUESTS</text><text x="32" y="164" font-size="30" font-weight="700">%d</text>
-<text x="232" y="130" font-size="13" fill="#6b7280">TOTAL TOKENS</text><text x="232" y="164" font-size="30" font-weight="700">%d</text>
-<text x="432" y="130" font-size="13" fill="#6b7280">TOTAL SPENT</text><text x="432" y="164" font-size="30" font-weight="700">$%.2f</text>
-<text x="632" y="130" font-size="13" fill="#6b7280">AVG LATENCY</text><text x="632" y="164" font-size="30" font-weight="700">%.0fms</text>
+<text x="32" y="130" font-size="13" fill="#6b7280">%s</text><text x="32" y="164" font-size="30" font-weight="700">%d</text>
+<text x="232" y="130" font-size="13" fill="#6b7280">%s</text><text x="232" y="164" font-size="30" font-weight="700">%d</text>
+<text x="432" y="130" font-size="13" fill="#6b7280">%s</text><text x="432" y="164" font-size="30" font-weight="700">$%.2f</text>
+<text x="632" y="130" font-size="13" fill="#6b7280">%s</text><text x="632" y="164" font-size="30" font-weight="700">%.0fms</text>
 </g>
 <line x1="32" y1="206" x2="768" y2="206" stroke="#e5e7eb"/>
-<text x="32" y="244" font-family="system-ui,sans-serif" font-size="13" fill="#6b7280">Prompt <tspan font-weight="700" fill="#111827">%d</tspan> · Completion <tspan font-weight="700" fill="#111827">%d</tspan> · Cache read <tspan font-weight="700" fill="#111827">%d</tspan></text>
-<text x="32" y="276" font-family="system-ui,sans-serif" font-size="13" fill="#6b7280">Avg TTFT <tspan font-weight="700" fill="#111827">%.0fms</tspan> · Shadow cost <tspan font-weight="700" fill="#111827">$%.2f</tspan></text>
-</svg>`, escapeXML(sinceLabel(r.URL.Query().Get("since"))), escapeXML(project), escapeXML(source),
-			summary.TotalRequests, summary.TotalTokens, summary.TotalCostUSD, summary.AvgLatencyMs,
-			summary.PromptTokens, summary.CompletionTokens, summary.CacheReadTokens,
-			summary.AvgTTFBMs, summary.TotalShadowCost)
+<text x="32" y="244" font-family="system-ui,sans-serif" font-size="13" fill="#6b7280">%s <tspan font-weight="700" fill="#111827">%d</tspan> · %s <tspan font-weight="700" fill="#111827">%d</tspan> · %s <tspan font-weight="700" fill="#111827">%d</tspan></text>
+<text x="32" y="276" font-family="system-ui,sans-serif" font-size="13" fill="#6b7280">%s <tspan font-weight="700" fill="#111827">%.0fms</tspan> · %s <tspan font-weight="700" fill="#111827">$%.2f</tspan></text>
+</svg>`, escapeXML(labels.Title), escapeXML(labels.Title), escapeXML(sinceLabel(r.URL.Query().Get("since"), labels)), escapeXML(project), escapeXML(source),
+			labels.Requests, summary.TotalRequests, labels.Tokens, summary.TotalTokens,
+			labels.Spent, summary.TotalCostUSD, labels.Latency, summary.AvgLatencyMs,
+			labels.Prompt, summary.PromptTokens, labels.Completion, summary.CompletionTokens,
+			labels.CacheRead, summary.CacheReadTokens,
+			labels.TTFT, summary.AvgTTFBMs, labels.Shadow, summary.TotalShadowCost)
 		_, _ = w.Write([]byte(svg))
 	})
 
@@ -765,7 +779,7 @@ func dashboardRouter(
 	r.Get("/sessions/live", func(w http.ResponseWriter, r *http.Request) {
 		sessions, err := database.GetLiveSessions()
 		if err != nil {
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "live runs unavailable"})
+			writeAPIError(w, http.StatusInternalServerError, "error.stats.liveRuns", "live runs unavailable")
 			return
 		}
 
@@ -794,27 +808,25 @@ func dashboardRouter(
 	return r
 }
 
-// persistGuardLimits updates only the guard block, preserving every other
-// config field. The temp file + rename keeps a concurrent restart from
-// observing a half-written config.
-func persistGuardLimits(path string, limits config.GuardConfig) error {
+// readConfigObject loads the config as raw blocks so handlers can preserve
+// fields they do not own.
+func readConfigObject(path string) (map[string]json.RawMessage, error) {
 	data, err := os.ReadFile(path)
 	if os.IsNotExist(err) {
 		data, err = os.ReadFile("config.json.example")
 	}
 	if err != nil {
-		return err
+		return nil, err
 	}
 	var root map[string]json.RawMessage
 	if err := json.Unmarshal(data, &root); err != nil {
-		return err
+		return nil, err
 	}
-	body, err := json.Marshal(limits)
-	if err != nil {
-		return err
-	}
-	root["guard"] = body
-	data, err = json.MarshalIndent(root, "", "  ")
+	return root, nil
+}
+
+func writeConfigObject(path string, root map[string]json.RawMessage) error {
+	data, err := json.MarshalIndent(root, "", "  ")
 	if err != nil {
 		return err
 	}
@@ -830,6 +842,57 @@ func persistGuardLimits(path string, limits config.GuardConfig) error {
 		return err
 	}
 	return nil
+}
+
+// persistGuardLimits updates only the guard block, preserving every other
+// config field.
+func persistGuardLimits(path string, limits config.GuardConfig) error {
+	root, err := readConfigObject(path)
+	if err != nil {
+		return err
+	}
+	body, err := json.Marshal(limits)
+	if err != nil {
+		return err
+	}
+	root["guard"] = body
+	return writeConfigObject(path, root)
+}
+
+// persistSessionPath updates one entry of sessions.paths. Empty removes it.
+func persistSessionPath(path, cli, root string) error {
+	cfg, err := readConfigObject(path)
+	if err != nil {
+		return err
+	}
+	sessions := map[string]json.RawMessage{}
+	if raw := cfg["sessions"]; len(raw) > 0 {
+		if err := json.Unmarshal(raw, &sessions); err != nil {
+			return err
+		}
+	}
+	paths := map[string]string{}
+	if raw := sessions["paths"]; len(raw) > 0 {
+		if err := json.Unmarshal(raw, &paths); err != nil {
+			return err
+		}
+	}
+	if root == "" {
+		delete(paths, cli)
+	} else {
+		paths[cli] = root
+	}
+	pathsBody, err := json.Marshal(paths)
+	if err != nil {
+		return err
+	}
+	sessions["paths"] = pathsBody
+	sessionsBody, err := json.Marshal(sessions)
+	if err != nil {
+		return err
+	}
+	cfg["sessions"] = sessionsBody
+	return writeConfigObject(path, cfg)
 }
 
 func resolveSince(s string) string {
@@ -945,9 +1008,9 @@ func escapeXML(value string) string {
 	return b.String()
 }
 
-func sinceLabel(raw string) string {
+func sinceLabel(raw string, labels svgLabels) string {
 	if raw == "" || raw == "all" {
-		return "all time"
+		return labels.AllTime
 	}
 	return raw
 }

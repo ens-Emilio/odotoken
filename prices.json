@@ -8213,30 +8213,6 @@
     "cache_read": 0,
     "cache_write": 0
   },
-  "pegasus-claude-speed": {
-    "input": 3,
-    "output": 15,
-    "cache_read": 3.75,
-    "cache_write": 18.75
-  },
-  "pegasus-claude-ultra": {
-    "input": 5,
-    "output": 25,
-    "cache_read": 6.25,
-    "cache_write": 31.25
-  },
-  "pegasus-claude-thinking": {
-    "input": 5,
-    "output": 25,
-    "cache_read": 6.25,
-    "cache_write": 31.25
-  },
-  "pegasus-haiku-flash": {
-    "input": 1,
-    "output": 5,
-    "cache_read": 1.25,
-    "cache_write": 6.25
-  },
   "ai21.j2-mid-v1": {
     "input": 12.5,
     "output": 12.5,

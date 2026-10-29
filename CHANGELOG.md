@@ -2,6 +2,22 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+## [0.7.0] - 2026-10-28
+### Added
+- Dashboard localization in 20 languages, including right-to-left layout for Arabic and Persian
+- Local session import shared by the dashboard Import view, `odotoken import`, and `/api/import/*`
+- Import history with per-CLI inserted/duplicate counts, tokens, cost, and terminal status
+- `--lang` on `odotoken import`, falling back to `LC_ALL`, `LC_MESSAGES`, then `LANG`
+
+### Changed
+- CLI table columns pad by display width, so CJK, Devanagari, and Arabic labels no longer misalign
+- `--json` output is never translated
+
+### Fixed
+- `zh_TW` no longer collapses to `zh-CN`, and Traditional Chinese keeps its script
+- Currency totals in import reports keep their full precision instead of compacting to `$1k`
 ## [0.6.0] - 2026-10-28
 ### Added
 - 21 color palettes inspired by native fruits from Acre, Brazil — each palette extracts real tones from skin, pulp and leaves of Amazonian fruits (Açaí, Cupuaçu, Pupunha, Tucumã, Bacuri, Biribá, Buriti, Bacaba, Patauá, Ingá, Taperebá, Abiu, Uxi, Araçá-boi, Banana, Abacaxi, Graviola, Maracujá, Manga, Mamão, Melancia)

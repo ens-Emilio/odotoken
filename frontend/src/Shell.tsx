@@ -1,22 +1,27 @@
 import { PanelLeftClose, PanelLeftOpen } from 'lucide-react'
 import type { ViewId } from './views'
 import { APP_TAGLINE, APP_VERSION } from './version'
+import { useLocale } from './i18n/useLocale'
 
-const VIEW_META: Record<ViewId, { label: string }> = {
-  overview: { label: 'Overview' },
-  models: { label: 'Models' },
-  clients: { label: 'Client Apps' },
-  events: { label: 'Events' },
-  throughput: { label: 'Throughput' },
-  guard: { label: 'Guard' },
-  settings: { label: 'Settings' },
+// Keys, not prose: the label is resolved at render so a language change
+// repaints the sidebar without rebuilding this table.
+const VIEW_LABEL_KEYS: Record<ViewId, string> = {
+  overview: 'nav.overview',
+  models: 'nav.models',
+  clients: 'nav.clients',
+  events: 'nav.events',
+  throughput: 'nav.throughput',
+  guard: 'nav.guard',
+  settings: 'nav.settings',
+  import: 'nav.import',
 }
-const VIEW_GROUPS: { label: string; ids: ViewId[] }[] = [
-  { label: 'Monitor', ids: ['overview', 'models', 'clients', 'events', 'throughput'] },
-  { label: 'Control', ids: ['guard', 'settings'] },
+const VIEW_GROUPS: { labelKey: string; ids: ViewId[] }[] = [
+  { labelKey: 'nav.monitor', ids: ['overview', 'models', 'clients', 'events', 'throughput'] },
+  { labelKey: 'nav.control', ids: ['guard', 'settings', 'import'] },
 ]
 
 export function Sidebar({ view, onView, guardBreached, open, onToggle }: { view: ViewId; onView: (v: ViewId) => void; guardBreached: boolean; open: boolean; onToggle: () => void }) {
+  const { t } = useLocale()
   const nav = (
     <>
       <div className="flex items-center gap-2 px-3 py-4">
@@ -33,19 +38,19 @@ export function Sidebar({ view, onView, guardBreached, open, onToggle }: { view:
 
       <nav className="flex-1 space-y-4 px-2 pt-2">
         {VIEW_GROUPS.map((group) => (
-          <div key={group.label}>
-            {open && <div className="mb-1 px-2.5 text-[10px] font-semibold uppercase tracking-wider text-[var(--text-faint)]">{group.label}</div>}
+          <div key={t(group.labelKey)}>
+            {open && <div className="mb-1 px-2.5 text-[10px] font-semibold uppercase tracking-wider text-[var(--text-faint)]">{t(group.labelKey)}</div>}
             <div className="space-y-0.5">
               {group.ids.map((v) => (
                 <button
                   key={v}
                   aria-current={view === v ? 'page' : undefined}
-                  aria-label={VIEW_META[v].label}
+                  aria-label={t(VIEW_LABEL_KEYS[v])}
                   onClick={() => {
                     onView(v)
                     if (window.innerWidth < 768 && open) onToggle()
                   }}
-                  title={VIEW_META[v].label}
+                  title={t(VIEW_LABEL_KEYS[v])}
                   className={`relative flex w-full items-center gap-2.5 rounded-md px-2.5 py-2 text-[12px] font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-[var(--brand)] focus:ring-offset-0 ${
                     view === v
                       ? 'bg-[var(--bg-fill-secondary)] text-[var(--text-strong)]'
@@ -53,9 +58,9 @@ export function Sidebar({ view, onView, guardBreached, open, onToggle }: { view:
                   }`}
                 >
                   <ViewIcon id={v} active={view === v} />
-                  {open && <span className="truncate">{VIEW_META[v].label}</span>}
+                  {open && <span className="truncate">{t(VIEW_LABEL_KEYS[v])}</span>}
                   {v === 'guard' && guardBreached && (
-                    <span className={`h-1.5 w-1.5 rounded-full bg-[var(--danger)] ${open ? 'ml-auto' : 'absolute right-1 top-1'}`} aria-hidden />
+                    <span className={`h-1.5 w-1.5 rounded-full bg-[var(--danger)] ${open ? 'ms-auto' : 'absolute end-1 top-1'}`} aria-hidden />
                   )}
                 </button>
               ))}
@@ -67,11 +72,11 @@ export function Sidebar({ view, onView, guardBreached, open, onToggle }: { view:
       <button
         className="flex items-center gap-2 rounded-md px-3 py-3 text-[var(--text-soft)] hover:bg-[var(--bg-fill-tertiary)] hover:text-[var(--text-strong)] focus:outline-none focus:ring-2 focus:ring-[var(--brand)]"
         onClick={onToggle}
-        aria-label={open ? 'Collapse sidebar' : 'Expand sidebar'}
+        aria-label={open ? t('shell.collapseSidebar') : t('shell.expandSidebar')}
         aria-expanded={open}
       >
         {open ? <PanelLeftClose className="h-4 w-4" /> : <PanelLeftOpen className="h-4 w-4" />}
-        {open && <span className="text-[11px]">Collapse</span>}
+        {open && <span className="text-[11px]">{t('shell.collapse')}</span>}
       </button>
     </>
   )
@@ -86,7 +91,7 @@ export function Sidebar({ view, onView, guardBreached, open, onToggle }: { view:
       {/* Mobile overlay */}
       {open && (
         <div className="fixed inset-0 z-40 flex md:hidden" aria-modal="true" role="dialog">
-          <button type="button" aria-label="Close sidebar" className="absolute inset-0 bg-black/30 backdrop-blur-sm" onClick={onToggle} />
+          <button type="button" aria-label={t('shell.closeSidebar')} className="absolute inset-0 bg-black/30 backdrop-blur-sm" onClick={onToggle} />
           <aside className="glass relative flex h-full w-64 shrink-0 flex-col border-r shadow-[var(--shadow-pop)]">
             {nav}
           </aside>
@@ -105,6 +110,7 @@ function ViewIcon({ id, active }: { id: ViewId; active: boolean }) {
     case 'events': return <svg className={cls} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
     case 'throughput': return <svg className={cls} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 17l6-6 4 4 8-8"/><path d="M14 7h7v7"/></svg>
     case 'guard': return <svg className={cls} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/></svg>
+    case 'import': return <svg className={cls} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 3v12m0 0 4-4m-4 4-4-4"/><path d="M5 20h14"/></svg>
     case 'settings': return <svg className={cls} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h0a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51h0a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v0a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0 1.51 1H21z"/></svg>
   }
 }

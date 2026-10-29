@@ -118,7 +118,7 @@ func (p *Proxy) director(req *http.Request) {
 		}
 	}
 
-	// Try to extract provider from path prefix (e.g., /kodeo/chat/completions → kodeo)
+	// Try to extract provider from path prefix (e.g., /myrelay/chat/completions)
 	if upstream == nil {
 		pathParts := strings.Split(strings.TrimPrefix(req.URL.Path, "/"), "/")
 		if len(pathParts) > 0 {
@@ -129,7 +129,7 @@ func (p *Proxy) director(req *http.Request) {
 			p.mu.RUnlock()
 			if ok {
 				provider = pathProvider
-				// Strip provider prefix from path for upstream (e.g., /kodeo/chat/completions → /chat/completions)
+				// Strip the provider prefix so the upstream sees its own path
 				req.URL.Path = "/" + strings.Join(pathParts[1:], "/")
 			}
 		}
@@ -151,8 +151,8 @@ func (p *Proxy) director(req *http.Request) {
 		// Final fallback: find which provider matches the configured openai upstream
 		p.mu.RLock()
 		defaultUpstream := p.upstreams["openai"]
-		// Reverse lookup: if openai upstream points to a custom host (e.g., kodeo),
-		// find the provider name that owns that upstream
+		// Reverse lookup: when the openai upstream points at a relay, find the
+		// provider name that owns that host
 		for name, u := range p.upstreams {
 			if name != "openai" && u.Host == defaultUpstream.Host && u.Scheme == defaultUpstream.Scheme {
 				provider = name
@@ -393,14 +393,12 @@ func (p *Proxy) modifyResponse(resp *http.Response) error {
 		p.mu.RLock()
 		openaiUpstream := p.upstreams["openai"]
 		if openaiUpstream != nil && openaiUpstream.Host != "api.openai.com" {
-			if _, ok := p.cfg.Providers["kodeo"]; ok {
-				provider = "kodeo"
-			} else {
-				for name := range p.cfg.Providers {
-					if name != "openai" && name != "anthropic" && name != "gemini" && name != "ollama" {
-						provider = name
-						break
-					}
+			// The openai upstream points at a relay; report it under the name
+			// the operator gave that provider instead of a generic "openai".
+			for name, u := range p.upstreams {
+				if name != "openai" && u.Host == openaiUpstream.Host {
+					provider = name
+					break
 				}
 			}
 		}

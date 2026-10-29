@@ -6,6 +6,8 @@ export interface GuardEvent {
   timestamp: string
   status: string
   message: string
+  message_code?: string
+  message_params?: string
   action: string
   daily_cost_usd: number
   monthly_cost_usd: number
@@ -15,6 +17,8 @@ export interface GuardStatus {
   status: string
   allowed: boolean
   reason: string
+  reason_code?: string
+  reason_params?: Record<string, string>
   history?: GuardEvent[]
 }
 

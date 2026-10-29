@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect, Component, type ReactNode } from 'react'
+import { useLocale } from './i18n/useLocale'
 
 class ErrorBoundary extends Component<{ children: ReactNode }, { error: Error | null }> {
   state = { error: null as Error | null }
@@ -9,7 +10,6 @@ class ErrorBoundary extends Component<{ children: ReactNode }, { error: Error | 
   }
 }
 
-import { TimezoneProvider } from './context/TimezoneContext'
 import { AnimatePresence, motion } from 'motion/react'
 import { Sidebar } from './Shell'
 import { useTheme } from './theme'
@@ -18,8 +18,9 @@ import { ToastHost } from './ui/Toast'
 import { toast } from './ui/toast-store'
 import { Select } from './ui/Select'
 import { useFilterOptions, useGuardStatus } from './api'
+import { guardStatusReason } from './guard-reason'
 import type { ViewId } from './views'
-import { OverviewView, ModelsView, ClientsView, EventsView, ThroughputView, GuardView, SettingsView } from './views'
+import { OverviewView, ModelsView, ClientsView, EventsView, ThroughputView, GuardView, SettingsView, ImportView } from './views'
 
 function View({ id, timeFilter, project, source, tag }: { id: ViewId; timeFilter: string; project: string; source: string; tag: string }) {
   switch (id) {
@@ -30,6 +31,7 @@ function View({ id, timeFilter, project, source, tag }: { id: ViewId; timeFilter
     case 'throughput': return <ThroughputView timeFilter={timeFilter} project={project} source={source} tag={tag} />
     case 'guard': return <GuardView />
     case 'settings': return <SettingsView />
+    case 'import': return <ImportView />
   }
 }
 
@@ -48,6 +50,7 @@ export default function App() {
   const [source, setSource] = useState(() => initParams.get('source') || 'all')
   const [sidebarOpen, setSidebarOpen] = useState(true)
   const theme = useTheme()
+  const { t } = useLocale()
 
  const { data: guardData, error } = useGuardStatus()
  const guardStatus = guardData?.status ?? 'ok'
@@ -58,11 +61,12 @@ export default function App() {
   // Toast when guard status transitions into warning/breached
   useEffect(() => {
     if (guardStatus !== prevStatus.current) {
-      if (guardStatus === 'warning') toast('warn', 'Budget warning: ' + (guardData?.reason || 'threshold reached'))
-      if (guardStatus === 'breached') toast('error', 'Budget limit breached: ' + (guardData?.reason || ''))
+      const reason = guardStatusReason(t, guardData) || t('app.thresholdReached')
+      if (guardStatus === 'warning') toast('warn', t('app.guardWarning', { reason }))
+      if (guardStatus === 'breached') toast('error', t('app.guardBreached', { reason }))
       prevStatus.current = guardStatus
     }
-  }, [guardStatus, guardData?.reason])
+  }, [guardStatus, guardData, t])
 
   const changeView = (v: ViewId) => {
     setView(v)
@@ -90,24 +94,19 @@ export default function App() {
   }, [view, timeFilter, project, source, tag])
 
   const viewTitle: Record<ViewId, string> = {
-    overview: 'Overview',
-    models: 'Models',
-    clients: 'Client Apps',
-    events: 'Events',
-    throughput: 'Throughput',
-    guard: 'Guard',
-    settings: 'Settings',
+    overview: t('nav.overview'), models: t('nav.models'), clients: t('nav.clients'),
+    events: t('nav.events'), throughput: t('nav.throughput'), guard: t('nav.guard'),
+    settings: t('nav.settings'), import: t('nav.import'),
   }
 
   return (
     <ErrorBoundary>
-    <TimezoneProvider>
     <div className="flex min-h-screen">
       <Sidebar view={view} onView={changeView} guardBreached={guardStatus === 'breached' || guardStatus === 'warning'} open={sidebarOpen} onToggle={() => setSidebarOpen((o) => !o)} />
       <div className="min-w-0 flex-1">
         <header className="sticky top-0 z-30 flex items-center justify-between gap-3 border-b border-[var(--border)] bg-[var(--glass-regular)] px-3 py-3 backdrop-blur-xl sm:px-5">
           <div className="flex items-center gap-2">
-            <button className="rounded-md p-2 text-[var(--text-muted)] hover:bg-[var(--bg-fill-secondary)] md:hidden" aria-label="Open navigation" onClick={() => setSidebarOpen(true)}>
+            <button className="rounded-md p-2 text-[var(--text-muted)] hover:bg-[var(--bg-fill-secondary)] md:hidden" aria-label={t('shell.openNavigation')} onClick={() => setSidebarOpen(true)}>
               <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M4 6h16M4 12h16M4 18h16"/></svg>
             </button>
             <h2 className="text-[13px] font-semibold text-[var(--text-strong)]">{viewTitle[view]}</h2>
@@ -127,26 +126,26 @@ export default function App() {
                 }}
               >
                 <svg className="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M22 3H2l8 9.46V19l4 2v-8.54L22 3z"/></svg>
-                Filters
+                {t('filter.title')}
                 {(source !== 'all' || project !== 'all' || tag !== 'all') && (
-                  <span className="ml-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-[var(--accent)] px-1 text-[9px] font-bold text-[var(--accent-contrast)]">
+                  <span className="ms-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-[var(--accent)] px-1 text-[9px] font-bold text-[var(--accent-contrast)]">
                     {[source !== 'all', project !== 'all', tag !== 'all'].filter(Boolean).length}
                   </span>
                 )}
               </button>
-              <div className="absolute right-0 top-full mt-1.5 hidden z-40 w-[280px] max-w-[280px] rounded-xl border border-[var(--border)] bg-[var(--bg-elevated)] p-3 shadow-[var(--shadow-pop)]">
+              <div className="absolute end-0 top-full mt-1.5 hidden z-40 w-[280px] max-w-[280px] rounded-xl border border-[var(--border)] bg-[var(--bg-elevated)] p-3 shadow-[var(--shadow-pop)]">
                 <div className="space-y-2">
                   <div>
-                    <label className="mb-1 block text-[10px] font-semibold uppercase tracking-wider text-[var(--text-soft)]">Source</label>
- <Select value={source} onChange={(v) => { setSource(v); if (v === 'all') document.querySelector('.group > div')?.classList.add('hidden') }} dropdownClassName="select-dropdown-constrained" options={[{ value: 'all', label: 'All sources' }, { value: 'proxy', label: 'Proxy' }, { value: 'import', label: 'Imported' }, ...(filterOptions?.by_source ?? []).map((s) => ({ value: s.source ?? '', label: `${s.source} (${s.requests})` }))]} />
+                    <label className="mb-1 block text-[10px] font-semibold uppercase tracking-wider text-[var(--text-soft)]">{t('filter.source')}</label>
+ <Select value={source} onChange={(v) => { setSource(v); if (v === 'all') document.querySelector('.group > div')?.classList.add('hidden') }} dropdownClassName="select-dropdown-constrained" options={[{ value: 'all', label: t('filter.allSources') }, { value: 'proxy', label: t('filter.proxy') }, { value: 'import', label: t('filter.imported') }, ...(filterOptions?.by_source ?? []).map((s) => ({ value: s.source ?? '', label: `${s.source} (${s.requests})` }))]} />
                   </div>
                   <div>
-                    <label className="mb-1 block text-[10px] font-semibold uppercase tracking-wider text-[var(--text-soft)]">Project</label>
- <Select value={project} onChange={(v) => { setProject(v); if (v === 'all') document.querySelector('.group > div')?.classList.add('hidden') }} dropdownClassName="select-dropdown-constrained" options={[{ value: 'all', label: 'All projects' }, ...(filterOptions?.by_project ?? []).map((p) => ({ value: p.project_id ?? '', label: `${p.project_id} (${p.requests})` }))]} />
+                    <label className="mb-1 block text-[10px] font-semibold uppercase tracking-wider text-[var(--text-soft)]">{t('filter.project')}</label>
+ <Select value={project} onChange={(v) => { setProject(v); if (v === 'all') document.querySelector('.group > div')?.classList.add('hidden') }} dropdownClassName="select-dropdown-constrained" options={[{ value: 'all', label: t('filter.allProjects') }, ...(filterOptions?.by_project ?? []).map((p) => ({ value: p.project_id ?? '', label: `${p.project_id} (${p.requests})` }))]} />
                   </div>
                   <div>
-                    <label className="mb-1 block text-[10px] font-semibold uppercase tracking-wider text-[var(--text-soft)]">Tag</label>
- <Select value={tag} onChange={(v) => { setTag(v); if (v === 'all') document.querySelector('.group > div')?.classList.add('hidden') }} dropdownClassName="select-dropdown-constrained" options={[{ value: 'all', label: 'All tags' }, ...(filterOptions?.by_tag ?? []).map((t) => ({ value: t.tag ?? '', label: `${t.tag} (${t.requests})` }))]} />
+                    <label className="mb-1 block text-[10px] font-semibold uppercase tracking-wider text-[var(--text-soft)]">{t('filter.tag')}</label>
+ <Select value={tag} onChange={(v) => { setTag(v); if (v === 'all') document.querySelector('.group > div')?.classList.add('hidden') }} dropdownClassName="select-dropdown-constrained" options={[{ value: 'all', label: t('filter.allTags') }, ...(filterOptions?.by_tag ?? []).map((t) => ({ value: t.tag ?? '', label: `${t.tag} (${t.requests})` }))]} />
                   </div>
                 </div>
               </div>
@@ -163,15 +162,15 @@ export default function App() {
                   aria-pressed={timeFilter === f}
                   onClick={() => setTimeFilter(f)}
                 >
-                  {f === 'today' ? 'Today' : f === '7d' ? '7 days' : f === '30d' ? '30 days' : f === '90d' ? '90 days' : f === '180d' ? '180 days' : f === '365d' ? '365 days' : 'All'}
+                  {f === 'today' ? t('time.today') : f === '7d' ? t('time.7d') : f === '30d' ? t('time.30d') : f === '90d' ? t('time.90d') : f === '180d' ? t('time.180d') : f === '365d' ? t('time.365d') : t('time.all')}
                 </button>
               ))}
             </div>
             <PaletteSelector palette={theme.palette} setPalette={theme.setPalette} />
             <button
               className="rounded-lg border border-[var(--border)] bg-[var(--bg-panel)] p-2 text-[var(--text-muted)] hover:text-[var(--text-strong)]"
-              title={`Theme: ${theme.mode}`}
-              aria-label={`Theme: ${theme.mode}`}
+              title={t('shell.theme', { mode: theme.mode })}
+              aria-label={t('shell.theme', { mode: theme.mode })}
               onClick={() => theme.setMode(theme.mode === 'dark' ? 'light' : theme.mode === 'light' ? 'system' : 'dark')}
             >
               <ThemeGlyph mode={theme.mode} />
@@ -193,7 +192,6 @@ export default function App() {
       </div>
       <ToastHost />
     </div>
-    </TimezoneProvider>
     </ErrorBoundary>
   )
 }
@@ -206,6 +204,7 @@ function ThemeGlyph({ mode }: { mode: 'light' | 'dark' | 'system' }) {
 }
 
 function PaletteSelector({ palette, setPalette }: { palette: PaletteId; setPalette: (id: PaletteId) => void }) {
+  const { t } = useLocale()
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
   const current = PALETTES.find(p => p.id === palette) ?? PALETTES[0]
@@ -224,21 +223,21 @@ function PaletteSelector({ palette, setPalette }: { palette: PaletteId; setPalet
       <button
         onClick={() => setOpen(v => !v)}
         className="flex items-center gap-1.5 rounded-lg border border-[var(--border)] bg-[var(--bg-panel)] px-2 py-2 text-[var(--text-muted)] hover:text-[var(--text-strong)]"
-        title={`Paleta: ${current.name}`}
-        aria-label={`Paleta: ${current.name}`}
+        title={t('shell.palette', { name: current.name })}
+        aria-label={t('shell.palette', { name: current.name })}
         aria-expanded={open}
       >
         <span className="inline-block h-3.5 w-3.5 rounded-full border border-[var(--border)]" style={{ backgroundColor: current.color }} />
       </button>
       {open && (
-        <div className="absolute right-0 top-full z-40 mt-1.5 w-[220px] max-h-[420px] overflow-auto rounded-xl border border-[var(--border)] bg-[var(--bg-elevated)] p-2 shadow-[var(--shadow-pop)]">
-          <div className="mb-1.5 px-2 text-[10px] font-semibold uppercase tracking-wider text-[var(--text-faint)]">Paleta de Cores</div>
+        <div className="absolute end-0 top-full z-40 mt-1.5 w-[220px] max-h-[420px] overflow-auto rounded-xl border border-[var(--border)] bg-[var(--bg-elevated)] p-2 shadow-[var(--shadow-pop)]">
+          <div className="mb-1.5 px-2 text-[10px] font-semibold uppercase tracking-wider text-[var(--text-faint)]">{t('shell.colorPalette')}</div>
           <div className="space-y-0.5">
             {PALETTES.map((p) => (
               <button
                 key={p.id}
                 onClick={() => { setPalette(p.id); setOpen(false) }}
-                className={`flex w-full items-center gap-2.5 rounded-md px-2 py-1.5 text-left text-[11px] transition-colors ${
+                className={`flex w-full items-center gap-2.5 rounded-md px-2 py-1.5 text-start text-[11px] transition-colors ${
                   palette === p.id
                     ? 'bg-[var(--accent)] text-[var(--accent-contrast)]'
                     : 'text-[var(--text-muted)] hover:bg-[var(--bg-fill-secondary)] hover:text-[var(--text-strong)]'

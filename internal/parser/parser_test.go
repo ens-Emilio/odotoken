@@ -97,14 +97,14 @@ func TestParseJSONResponseReadsOpenAIUsageFromCustomProvider(t *testing.T) {
 			},
 		},
 	}
-	got := ParseJSONResponse("ghostcli", data, "")
+	got := ParseJSONResponse("relay", data, "")
 	if got.PromptTokens != 13 || got.CompletionTokens != 1 || got.TotalTokens != 14 || got.CacheReadTokens != 3 {
-		t.Fatalf("ghostcli usage = %+v", got)
+		t.Fatalf("relay usage = %+v", got)
 	}
 }
 
 func TestFinalizeEstimatesCompletionFromContentDeltas(t *testing.T) {
-	acc := NewStreamAccumulator("ghostcli", "")
+	acc := NewStreamAccumulator("relay", "")
 	chunks := []string{
 		"data: {\"model\":\"claude-sonnet-5\",\"choices\":[{\"delta\":{\"content\":\"ok\"}}]}\n",
 		"data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n",

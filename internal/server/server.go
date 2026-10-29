@@ -15,6 +15,7 @@ import (
 	"github.com/ens-Emilio/odotoken/internal/config"
 	"github.com/ens-Emilio/odotoken/internal/db"
 	"github.com/ens-Emilio/odotoken/internal/guard"
+	"github.com/ens-Emilio/odotoken/internal/importers"
 	"github.com/ens-Emilio/odotoken/internal/pricing"
 	"github.com/ens-Emilio/odotoken/internal/proxy"
 )
@@ -87,7 +88,8 @@ func NewWithConfigPath(database *db.Database, cfg config.Config, logger *slog.Lo
 
 	// API routes
 	r.Mount("/v1", authed(api.Router(cfg, calc)))
-	r.Mount("/api", authed(api.DashboardRouter(database, g.Check, g.Limits, g.UpdateLimits, configPath)))
+	r.Mount("/api", authed(api.DashboardRouter(database, g.Check, g.Limits, g.UpdateLimits, configPath,
+		importers.NewEngine(importers.Paths(cfg.Sessions.Paths), calc, database))))
 
 	// Favicon — serve from disk
 	r.Get("/favicon.ico", func(w http.ResponseWriter, r *http.Request) {
@@ -100,9 +102,10 @@ func NewWithConfigPath(database *db.Database, cfg config.Config, logger *slog.Lo
 		w.Write(data)
 	})
 
-	// Root redirect → /app/
+	// Root redirect → /app/. The query string is forwarded: `?lang=xx` is a
+	// shareable link and a redirect that drops it silently loses the language.
 	r.Get("/", func(w http.ResponseWriter, r *http.Request) {
-		http.Redirect(w, r, "/app/", http.StatusTemporaryRedirect)
+		http.Redirect(w, r, "/app/"+querySuffix(r), http.StatusTemporaryRedirect)
 	})
 
 	// SPA: /app and /app/* serve index.html or static assets from disk
@@ -110,7 +113,7 @@ func NewWithConfigPath(database *db.Database, cfg config.Config, logger *slog.Lo
 	staticDir := "internal/server/static"
 
 	r.Get("/app", func(w http.ResponseWriter, r *http.Request) {
-		http.Redirect(w, r, "/app/", http.StatusTemporaryRedirect)
+		http.Redirect(w, r, "/app/"+querySuffix(r), http.StatusTemporaryRedirect)
 	})
 
 	r.Get("/app/*", func(w http.ResponseWriter, r *http.Request) {
@@ -169,6 +172,15 @@ func NewWithConfigPath(database *db.Database, cfg config.Config, logger *slog.Lo
 }
 
 // originAllowed reports whether origin is in the explicit allowlist.
+// querySuffix keeps the request's query string across a redirect, prefixed
+// with `?` when present.
+func querySuffix(r *http.Request) string {
+	if r.URL.RawQuery == "" {
+		return ""
+	}
+	return "?" + r.URL.RawQuery
+}
+
 func originAllowed(origin string, allowlist []string) bool {
 	for _, a := range allowlist {
 		if a == "*" || strings.EqualFold(a, origin) {

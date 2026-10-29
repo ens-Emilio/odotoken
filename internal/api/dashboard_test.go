@@ -14,6 +14,8 @@ import (
 	"github.com/ens-Emilio/odotoken/internal/config"
 	"github.com/ens-Emilio/odotoken/internal/db"
 	"github.com/ens-Emilio/odotoken/internal/domain"
+	"github.com/ens-Emilio/odotoken/internal/importers"
+	"github.com/ens-Emilio/odotoken/internal/pricing"
 )
 
 func TestGuardLimitsPatchPersistsAndUpdatesLiveGuard(t *testing.T) {
@@ -33,7 +35,7 @@ func TestGuardLimitsPatchPersistsAndUpdatesLiveGuard(t *testing.T) {
 	}
 	get := func() config.GuardConfig { return current }
 	update := func(v config.GuardConfig) { current = v }
-	router := DashboardRouter(database, checker, get, update, path)
+	router := DashboardRouter(database, checker, get, update, path, nil)
 
 	body := bytes.NewBufferString(`{
 		"daily_cost_limit_usd": 2.5,
@@ -103,6 +105,7 @@ func TestGuardLimitsPatchAcceptsNullsAndBreachAction(t *testing.T) {
 		func() config.GuardConfig { return current },
 		func(v config.GuardConfig) { current = v },
 		path,
+		nil,
 	)
 
 	body := bytes.NewBufferString(`{
@@ -145,7 +148,7 @@ func TestNewDashboardRoutesExposeLightweightContracts(t *testing.T) {
 	defer database.Close()
 	if _, err := database.InsertEvent(domain.TokenEvent{
 		Timestamp:        time.Now().UTC(),
-		Provider:         "ghostcli",
+		Provider:         "relay",
 		Model:            "claude-sonnet-5",
 		ClientApp:        "omp",
 		PromptTokens:     13,
@@ -173,6 +176,7 @@ func TestNewDashboardRoutesExposeLightweightContracts(t *testing.T) {
 		func() config.GuardConfig { return config.GuardConfig{ActionOnBreach: "block"} },
 		func(config.GuardConfig) {},
 		"",
+		nil,
 	)
 
 	statusRec := httptest.NewRecorder()
@@ -212,8 +216,116 @@ func TestNewDashboardRoutesExposeLightweightContracts(t *testing.T) {
 		t.Fatalf("csv = %d: %s", csvRec.Code, csvRec.Body.String())
 	}
 	svgRec := httptest.NewRecorder()
-	router.ServeHTTP(svgRec, httptest.NewRequest(http.MethodGet, "/stats.svg", nil))
-	if svgRec.Code != http.StatusOK || !strings.Contains(svgRec.Body.String(), "<svg") {
-		t.Fatalf("svg = %d: %s", svgRec.Code, svgRec.Body.String())
+	router.ServeHTTP(svgRec, httptest.NewRequest(http.MethodGet, "/stats.svg?lang=pt-BR", nil))
+	if svgRec.Code != http.StatusOK || !strings.Contains(svgRec.Body.String(), "REQUISIÇÕES") {
+		t.Fatalf("localized svg = %d: %s", svgRec.Code, svgRec.Body.String())
+	}
+}
+
+// TestImportPathPostPersistsAndAppliesToDiscovery covers the dashboard's
+// "point this CLI somewhere else" flow: the value must land in
+// sessions.paths, be visible to discovery immediately, and be removable.
+func TestImportPathPostPersistsAndAppliesToDiscovery(t *testing.T) {
+	database, err := db.Open(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	defer database.Close()
+
+	configPath := filepath.Join(t.TempDir(), "config.json")
+	if err := os.WriteFile(configPath, []byte(`{"guard":{"daily_tokens_limit":7}}`), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	engine := importers.NewEngine(importers.Paths{}, pricing.NewCalculator(""), database)
+	router := DashboardRouter(database, func(string) domain.GuardCheckResult {
+		return domain.GuardCheckResult{Allowed: true}
+	}, func() config.GuardConfig { return config.GuardConfig{} }, func(config.GuardConfig) {}, configPath, engine)
+
+	root := filepath.Join(t.TempDir(), "moved-claude")
+	if err := os.MkdirAll(root, 0o700); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+
+	post := func(path string) *httptest.ResponseRecorder {
+		body := bytes.NewBufferString(`{"cli":"claude","path":"` + path + `"}`)
+		req := httptest.NewRequest(http.MethodPost, "/import/path", body)
+		req.Header.Set("Content-Type", "application/json")
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, req)
+		return rec
+	}
+
+	rec := post(root)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("post status = %d: %s", rec.Code, rec.Body.String())
+	}
+	if got := engine.Registry.PathFor("claude"); got != root {
+		t.Fatalf("override = %q, want %q", got, root)
+	}
+	if !pathExistsOnDisk(root) {
+		t.Fatalf("configured root %q should exist", root)
+	}
+
+	// Discovery must read the new root, not the CLI's default.
+	for _, src := range engine.Discover(time.Time{}) {
+		if src.CLI == "claude" && src.Path != root {
+			t.Fatalf("discovery path = %q, want %q", src.Path, root)
+		}
+	}
+
+	persisted, err := config.Load(configPath)
+	if err != nil {
+		t.Fatalf("reload config: %v", err)
+	}
+	if persisted.Sessions.Paths["claude"] != root {
+		t.Fatalf("sessions.paths[claude] = %q, want %q", persisted.Sessions.Paths["claude"], root)
+	}
+	if persisted.Guard.DailyTokenLimit != 7 {
+		t.Fatalf("guard block was not preserved: %+v", persisted.Guard)
+	}
+
+	// An empty path restores the default and drops the key.
+	if rec := post(""); rec.Code != http.StatusOK {
+		t.Fatalf("clear status = %d: %s", rec.Code, rec.Body.String())
+	}
+	if got := engine.Registry.PathFor("claude"); got != "" {
+		t.Fatalf("override after clear = %q, want empty", got)
+	}
+	persisted, err = config.Load(configPath)
+	if err != nil {
+		t.Fatalf("reload config: %v", err)
+	}
+	if _, ok := persisted.Sessions.Paths["claude"]; ok {
+		t.Fatal("cleared path must be removed from sessions.paths")
+	}
+}
+
+// TestImportPathRejectsRelativeAndUnknownCLI keeps a typo from silently
+// pointing a source at a path relative to the daemon's working directory.
+func TestImportPathRejectsRelativeAndUnknownCLI(t *testing.T) {
+	database, err := db.Open(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	defer database.Close()
+
+	engine := importers.NewEngine(importers.Paths{}, pricing.NewCalculator(""), database)
+	router := DashboardRouter(database, func(string) domain.GuardCheckResult {
+		return domain.GuardCheckResult{Allowed: true}
+	}, func() config.GuardConfig { return config.GuardConfig{} }, func(config.GuardConfig) {}, "", engine)
+
+	post := func(body string) int {
+		req := httptest.NewRequest(http.MethodPost, "/import/path", bytes.NewBufferString(body))
+		req.Header.Set("Content-Type", "application/json")
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, req)
+		return rec.Code
+	}
+
+	if code := post(`{"cli":"claude","path":"relative/dir"}`); code != http.StatusBadRequest {
+		t.Fatalf("relative path status = %d, want 400", code)
+	}
+	if code := post(`{"cli":"nope","path":"/tmp"}`); code != http.StatusBadRequest {
+		t.Fatalf("unknown cli status = %d, want 400", code)
 	}
 }

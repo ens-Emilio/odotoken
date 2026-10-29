@@ -1,4 +1,5 @@
 import type { ReactNode, HTMLAttributes } from 'react'
+import { useLocale } from '../i18n/useLocale'
 
 export function Card({ children, className, ...rest }: { children?: ReactNode; className?: string } & HTMLAttributes<HTMLDivElement>) {
   return (
@@ -38,11 +39,12 @@ export function Badge({ children, tone = 'neutral', title }: { children: ReactNo
 }
 
 export function Empty({ label, hint, onRetry }: { label: string; hint?: string; onRetry?: () => void }) {
+  const { t } = useLocale()
   return (
     <div className="flex flex-col items-center gap-1 py-8 text-center">
       <div className="text-[12px] font-medium text-[var(--text-soft)]">{label}</div>
       {hint && <div className="text-[11px] text-[var(--text-faint)]">{hint}</div>}
-      {onRetry && <button type="button" onClick={onRetry} className="mt-2 rounded-md border border-[var(--border)] bg-[var(--bg-panel)] px-2.5 py-1 text-[11px] font-medium text-[var(--text-strong)] hover:bg-[var(--bg-fill-secondary)] focus:outline-none focus:ring-2 focus:ring-[var(--brand)]">Try again</button>}
+      {onRetry && <button type="button" onClick={onRetry} className="mt-2 rounded-md border border-[var(--border)] bg-[var(--bg-panel)] px-2.5 py-1 text-[11px] font-medium text-[var(--text-strong)] hover:bg-[var(--bg-fill-secondary)] focus:outline-none focus:ring-2 focus:ring-[var(--brand)]">{t('common.tryAgain')}</button>}
     </div>
   )
 }

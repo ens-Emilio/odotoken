@@ -24,25 +24,6 @@ func IdentifyProvider(path string, headers map[string]string) string {
 	}
 }
 
-// InferProviderFromModel guesses provider from model name prefix.
-func InferProviderFromModel(model string) string {
-	m := strings.ToLower(model)
-	switch {
-	case strings.HasPrefix(m, "claude"):
-		return "anthropic"
-	case strings.HasPrefix(m, "gpt-") || strings.HasPrefix(m, "o1") || strings.HasPrefix(m, "o3"):
-		return "openai"
-	case strings.HasPrefix(m, "gemini"):
-		return "gemini"
-	case strings.HasPrefix(m, "llama") || strings.HasPrefix(m, "mistral") || strings.HasPrefix(m, "qwen"):
-		return "ollama"
-	case strings.HasPrefix(m, "minimax-") || strings.HasPrefix(m, "deepseek-") || strings.HasPrefix(m, "glm-"):
-		return "kodeo"
-	default:
-		return ""
-	}
-}
-
 // IdentifyClientApp infers client app from User-Agent or custom headers.
 func IdentifyClientApp(headers map[string]string) string {
 	ua := strings.ToLower(headers["user-agent"])
@@ -55,6 +36,8 @@ func IdentifyClientApp(headers map[string]string) string {
 		return "pi-agent"
 	case strings.Contains(ua, "omp"):
 		return "omp"
+	case strings.Contains(ua, "omo"):
+		return "omo"
 	case strings.Contains(ua, "opencode"):
 		return "opencode"
 	case strings.Contains(ua, "crush"):
@@ -106,9 +89,8 @@ func ParseJSONResponse(provider string, data map[string]interface{}, fallbackMod
 		res.PromptTokens = toInt(data["prompt_eval_count"])
 		res.CompletionTokens = toInt(data["eval_count"])
 	default:
-		// Named relay providers such as ghostcli and kodeo speak the OpenAI
-		// response shape. Without this fallback their exact usage was replaced
-		// by a body-size estimate.
+		// OpenAI-compatible relays speak the OpenAI response shape. Without
+		// this fallback their exact usage was replaced by a body-size estimate.
 		if usage, ok := data["usage"].(map[string]interface{}); ok {
 			res.PromptTokens = toInt(usage["prompt_tokens"])
 			res.CompletionTokens = toInt(usage["completion_tokens"])
@@ -227,7 +209,7 @@ func (s *StreamUsageAccumulator) ProcessChunk(chunk []byte) {
 		case "ollama":
 			s.handleOllamaEvent(data)
 		default:
-			// Treat all other providers (kodeo, ghostcli, openai, etc.) as OpenAI-compatible
+			// Every other provider is OpenAI-compatible.
 			s.handleOpenAIEvent(data)
 		}
 	}

@@ -4,23 +4,12 @@
     "api_key": "change-me-or-use-ODO_API_KEY",
     "cors_allowlist": ["http://localhost:5173"]
   },
-  "proxy": {
-    "host": "127.0.0.1",
-    "port": 8090,
-    "upstream_openai": "https://api.openai.com",
-    "upstream_anthropic": "https://api.anthropic.com",
-    "upstream_gemini": "https://generativelanguage.googleapis.com",
-    "upstream_ollama": "http://127.0.0.1:11434"
-  },
   "providers": {
     "openai": { "upstream_url": "https://api.openai.com" },
     "anthropic": { "upstream_url": "https://api.anthropic.com" },
     "gemini": { "upstream_url": "https://generativelanguage.googleapis.com" },
     "ollama": { "upstream_url": "http://127.0.0.1:11434" },
-    "kodeo": { "upstream_url": "https://api.kodeo.com.br/v1" },
-    "verboo": { "upstream_url": "https://code.verboo.ai/router/v1" },
-    "pegasus": { "upstream_url": "https://api.pegasusrelay.com/v1" },
-    "ghostcli": { "upstream_url": "https://ghostcli.cloud/v1" }
+    "custom": { "upstream_url": "https://your-provider.example/v1" }
   },
   "guard": {
     "daily_cost_limit_usd": 0,
@@ -53,10 +42,12 @@
     "paths": {
       "claude": "~/.claude/projects",
       "codex": "~/.codex/sessions",
-      "omp": "~/.omp/stats.db",
-      "crush": "~/.local/share/crush/projects.json"
+      "omp": "~/.omp/agent/sessions",
+      "crush": "~/.local/share/crush/projects.json",
+      "opencode": "~/.local/share/opencode/opencode.db",
+      "pi": "~/.pi/agent/sessions",
+      "omo": "~/.omo/agent/sessions"
     }
   },
-  "cache": { "semantic": { "enabled": false, "ttl": 3600 } },
-  "database": { "path": "odotoken.db" }
+  "cache": { "semantic": { "enabled": false, "ttl": 3600 } }
 }

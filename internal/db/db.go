@@ -3,6 +3,7 @@ package db
 import (
 	"database/sql"
 	"fmt"
+	"strings"
 	"time"
 
 	_ "modernc.org/sqlite"
@@ -50,6 +51,8 @@ CREATE TABLE IF NOT EXISTS guard_events (
 	status TEXT NOT NULL,
 	message TEXT NOT NULL,
 	action TEXT NOT NULL,
+	message_code TEXT NOT NULL DEFAULT '',
+	message_params TEXT NOT NULL DEFAULT '{}',
 	daily_cost_usd REAL NOT NULL DEFAULT 0,
 	monthly_cost_usd REAL NOT NULL DEFAULT 0
 );
@@ -72,6 +75,23 @@ CREATE TABLE IF NOT EXISTS active_runs (
 	cost_usd REAL NOT NULL DEFAULT 0.0
 );
 CREATE INDEX IF NOT EXISTS idx_active_runs_open ON active_runs(status, last_activity);
+
+CREATE TABLE IF NOT EXISTS import_runs (
+	id TEXT PRIMARY KEY,
+	started_at TEXT NOT NULL,
+	finished_at TEXT,
+	status TEXT NOT NULL DEFAULT 'running',
+	dry_run INTEGER NOT NULL DEFAULT 0,
+	clis TEXT NOT NULL DEFAULT '',
+	since TEXT NOT NULL DEFAULT '',
+	inserted INTEGER NOT NULL DEFAULT 0,
+	duplicates INTEGER NOT NULL DEFAULT 0,
+	tokens INTEGER NOT NULL DEFAULT 0,
+	cost_usd REAL NOT NULL DEFAULT 0.0,
+	error TEXT NOT NULL DEFAULT '',
+	report TEXT NOT NULL DEFAULT '{}'
+);
+CREATE INDEX IF NOT EXISTS idx_import_runs_started ON import_runs(started_at DESC);
 `
 
 // Database wraps SQLite operations.
@@ -93,6 +113,21 @@ func Open(path string) (*Database, error) {
 	if _, err := sqlDB.Exec(schema); err != nil {
 		sqlDB.Close()
 		return nil, fmt.Errorf("create schema: %w", err)
+	}
+
+	// The import uniqueness index is created after the schema and after
+	// duplicate rows are collapsed: adding it to `schema` would fail on a
+	// database that already imported the same session twice.
+	// guard_events gained reason columns after the table shipped, so an
+	// existing database needs them added rather than recreated.
+	if err := migrateGuardReason(sqlDB); err != nil {
+		sqlDB.Close()
+		return nil, fmt.Errorf("migrate guard reason: %w", err)
+	}
+
+	if err := migrateImportDedup(sqlDB); err != nil {
+		sqlDB.Close()
+		return nil, fmt.Errorf("migrate import dedup: %w", err)
 	}
 
 	return &Database{db: sqlDB}, nil
@@ -133,15 +168,30 @@ func (d *Database) InsertEvent(e domain.TokenEvent) (int64, error) {
 	return res.LastInsertId()
 }
 
-// InsertEvents inserts multiple events in a single transaction.
-func (d *Database) InsertEvents(events []domain.TokenEvent) error {
+// InsertResult reports what a batch actually wrote. An import needs the
+// distinction: a re-run must be able to say "0 new, 12000 already present"
+// instead of claiming it imported everything again.
+type InsertResult struct {
+	Inserted   int
+	Duplicates int
+}
+
+// InsertEvents inserts multiple events in a single transaction, skipping rows
+// that already exist. Uniqueness for imported rows comes from
+// idx_events_import_unique, not from application-level bookkeeping.
+func (d *Database) InsertEvents(events []domain.TokenEvent) (InsertResult, error) {
+	var result InsertResult
+	if len(events) == 0 {
+		return result, nil
+	}
+
 	tx, err := d.db.Begin()
 	if err != nil {
-		return fmt.Errorf("begin tx: %w", err)
+		return result, fmt.Errorf("begin tx: %w", err)
 	}
 	defer tx.Rollback()
 
-	stmt, err := tx.Prepare(`INSERT INTO token_events (
+	stmt, err := tx.Prepare(`INSERT OR IGNORE INTO token_events (
 		timestamp, provider, model, client_app,
 		prompt_tokens, completion_tokens, total_tokens,
 		cache_read_tokens, cache_write_tokens,
@@ -150,7 +200,7 @@ func (d *Database) InsertEvents(events []domain.TokenEvent) error {
 		session_id, session_file, entry_id
 	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
 	if err != nil {
-		return fmt.Errorf("prepare insert: %w", err)
+		return result, fmt.Errorf("prepare insert: %w", err)
 	}
 	defer stmt.Close()
 
@@ -159,27 +209,40 @@ func (d *Database) InsertEvents(events []domain.TokenEvent) error {
 		if e.Timestamp.IsZero() {
 			ts = time.Now().UTC().Format(time.RFC3339Nano)
 		}
-		if _, err := stmt.Exec(
+		res, err := stmt.Exec(
 			ts, e.Provider, e.Model, e.ClientApp,
 			e.PromptTokens, e.CompletionTokens, e.TotalTokens,
 			e.CacheReadTokens, e.CacheWriteTokens,
 			e.CostUSD, e.ShadowCost, e.LatencyMs, e.TTFBMs, e.StreamingMs,
 			e.StatusCode, e.ProjectID, e.Tags, e.Metadata, e.Source,
 			e.SessionID, e.SessionFile, e.EntryID,
-		); err != nil {
-			return fmt.Errorf("insert event batch: %w", err)
+		)
+		if err != nil {
+			return result, fmt.Errorf("insert event batch: %w", err)
+		}
+		if n, _ := res.RowsAffected(); n > 0 {
+			result.Inserted++
+		} else {
+			result.Duplicates++
 		}
 	}
 
-	return tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return InsertResult{}, fmt.Errorf("commit insert batch: %w", err)
+	}
+	return result, nil
 }
 
 // GuardEvent records a budget state transition for the dashboard.
 type GuardEvent struct {
-	ID             int64   `json:"id"`
-	Timestamp      string  `json:"timestamp"`
-	Status         string  `json:"status"`
+	ID        int64  `json:"id"`
+	Timestamp string `json:"timestamp"`
+	Status    string `json:"status"`
+	// Message is English prose for logs. MessageCode plus MessageParams are
+	// what the dashboard renders, so the reader's language wins.
 	Message        string  `json:"message"`
+	MessageCode    string  `json:"message_code,omitempty"`
+	MessageParams  string  `json:"message_params,omitempty"`
 	Action         string  `json:"action"`
 	DailyCostUSD   float64 `json:"daily_cost_usd"`
 	MonthlyCostUSD float64 `json:"monthly_cost_usd"`
@@ -187,10 +250,14 @@ type GuardEvent struct {
 
 // InsertGuardEvent persists a state transition, not every budget poll.
 func (d *Database) InsertGuardEvent(e GuardEvent) error {
+	if e.MessageParams == "" {
+		e.MessageParams = "{}"
+	}
 	_, err := d.db.Exec(`INSERT INTO guard_events
-		(timestamp, status, message, action, daily_cost_usd, monthly_cost_usd)
-		VALUES (?, ?, ?, ?, ?, ?)`,
-		e.Timestamp, e.Status, e.Message, e.Action, e.DailyCostUSD, e.MonthlyCostUSD)
+		(timestamp, status, message, action, message_code, message_params, daily_cost_usd, monthly_cost_usd)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		e.Timestamp, e.Status, e.Message, e.Action, e.MessageCode, e.MessageParams,
+		e.DailyCostUSD, e.MonthlyCostUSD)
 	return err
 }
 
@@ -200,8 +267,8 @@ func (d *Database) RecentGuardEvents(limit int) ([]GuardEvent, error) {
 		limit = 20
 	}
 	rows, err := d.db.Query(`SELECT id, timestamp, status, message, action,
-		daily_cost_usd, monthly_cost_usd FROM guard_events
-		ORDER BY id DESC LIMIT ?`, limit)
+		message_code, message_params, daily_cost_usd, monthly_cost_usd
+		FROM guard_events ORDER BY id DESC LIMIT ?`, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -210,7 +277,8 @@ func (d *Database) RecentGuardEvents(limit int) ([]GuardEvent, error) {
 	for rows.Next() {
 		var e GuardEvent
 		if err := rows.Scan(&e.ID, &e.Timestamp, &e.Status, &e.Message,
-			&e.Action, &e.DailyCostUSD, &e.MonthlyCostUSD); err != nil {
+			&e.Action, &e.MessageCode, &e.MessageParams,
+			&e.DailyCostUSD, &e.MonthlyCostUSD); err != nil {
 			return nil, err
 		}
 		result = append(result, e)
@@ -350,10 +418,7 @@ func (d *Database) localDailyUsage(days int, since, source string, tz ...string)
 	windowEnd := endDay.AddDate(0, 0, 2).UTC()
 	q := `SELECT timestamp, total_tokens, cost_usd FROM token_events WHERE timestamp >= ? AND timestamp < ?`
 	args := []interface{}{windowStart.Format(time.RFC3339), windowEnd.Format(time.RFC3339)}
-	if source != "" && source != "all" {
-		q += " AND source = ?"
-		args = append(args, source)
-	}
+	q, args = applySourceFilter(q, args, source)
 	q += " ORDER BY timestamp ASC"
 	rows, err := d.db.Query(q, args...)
 	if err != nil {
@@ -438,7 +503,7 @@ func (d *Database) GetCostSummaryInLocation(projectID string, loc *time.Location
 		COALESCE(SUM(CASE WHEN timestamp >= ? THEN cost_usd ELSE 0 END), 0),
 		COALESCE(SUM(CASE WHEN timestamp >= ? THEN total_tokens ELSE 0 END), 0),
 		COALESCE(SUM(CASE WHEN timestamp >= ? THEN total_tokens ELSE 0 END), 0)
-	FROM token_events WHERE project_id = ?`
+	FROM token_events WHERE project_id = ? AND source NOT LIKE 'import:%'`
 	var s CostSummary
 	err := d.db.QueryRow(q,
 		dayStart.UTC().Format(time.RFC3339),
@@ -599,10 +664,7 @@ func (d *Database) GetSummary(since, project, source, tag string) (Summary, erro
 		q += " AND project_id = ?"
 		args = append(args, project)
 	}
-	if source != "" && source != "all" {
-		q += " AND source = ?"
-		args = append(args, source)
-	}
+	q, args = applySourceFilter(q, args, source)
 	if tag != "" && tag != "all" {
 		q += " AND (',' || tags || ',') LIKE ?"
 		args = append(args, "%,"+tag+",%")
@@ -645,10 +707,7 @@ func (d *Database) GetSummaryByModel(since, project, source string) ([]ByModel, 
 		q += " AND project_id = ?"
 		args = append(args, project)
 	}
-	if source != "" && source != "all" {
-		q += " AND source = ?"
-		args = append(args, source)
-	}
+	q, args = applySourceFilter(q, args, source)
 	q += " GROUP BY model, provider ORDER BY SUM(cost_usd) DESC"
 	rows, err := d.db.Query(q, args...)
 	if err != nil {
@@ -689,10 +748,7 @@ func (d *Database) GetSummaryByClient(since, project, source string) ([]ByClient
 		q += " AND project_id = ?"
 		args = append(args, project)
 	}
-	if source != "" && source != "all" {
-		q += " AND source = ?"
-		args = append(args, source)
-	}
+	q, args = applySourceFilter(q, args, source)
 	q += " GROUP BY client_app ORDER BY SUM(cost_usd) DESC"
 	rows, err := d.db.Query(q, args...)
 	if err != nil {
@@ -729,10 +785,7 @@ func (d *Database) GetSummaryByProject(since, source string) ([]ByProject, error
 		q += " AND timestamp >= ?"
 		args = append(args, since)
 	}
-	if source != "" && source != "all" {
-		q += " AND source = ?"
-		args = append(args, source)
-	}
+	q, args = applySourceFilter(q, args, source)
 	q += " GROUP BY project_id ORDER BY SUM(cost_usd) DESC"
 	rows, err := d.db.Query(q, args...)
 	if err != nil {
@@ -809,10 +862,7 @@ func (d *Database) GetSummaryByTag(since, project, source string) ([]ByTag, erro
 		q += " AND project_id = ?"
 		args = append(args, project)
 	}
-	if source != "" && source != "all" {
-		q += " AND source = ?"
-		args = append(args, source)
-	}
+	q, args = applySourceFilter(q, args, source)
 	q += " GROUP BY tags ORDER BY SUM(cost_usd) DESC"
 	rows, err := d.db.Query(q, args...)
 	if err != nil {
@@ -939,10 +989,7 @@ func (d *Database) GetDailyDetail(day, tz, project, source, tag string) (summary
 		baseWhere += " AND project_id = ?"
 		args = append(args, project)
 	}
-	if source != "" && source != "all" {
-		baseWhere += " AND source = ?"
-		args = append(args, source)
-	}
+	baseWhere, args = applySourceFilter(baseWhere, args, source)
 	if tag != "" && tag != "all" {
 		baseWhere += " AND (',' || tags || ',') LIKE ?"
 		args = append(args, "%,"+tag+",%")
@@ -1071,10 +1118,7 @@ func (d *Database) GetTpsSummary(since, project, source string) (TpsSummary, err
 		where += " AND project_id = ?"
 		args = append(args, project)
 	}
-	if source != "" && source != "all" {
-		where += " AND source = ?"
-		args = append(args, source)
-	}
+	where, args = applySourceFilter(where, args, source)
 	q := `SELECT COUNT(*), COALESCE(SUM(completion_tokens),0),
 		COALESCE(SUM(total_tokens),0), COALESCE(AVG(latency_ms),0),
 		COALESCE(SUM(` + genSecsExpr + `),0)/1000.0
@@ -1136,10 +1180,7 @@ func (d *Database) GetTpsSeries(since, interval, project, source string) ([]TpsS
 		q += " AND project_id = ?"
 		args = append(args, project)
 	}
-	if source != "" && source != "all" {
-		q += " AND source = ?"
-		args = append(args, source)
-	}
+	q, args = applySourceFilter(q, args, source)
 	q += " GROUP BY ts ORDER BY ts ASC"
 	rows, err := d.db.Query(q, args...)
 	if err != nil {
@@ -1208,10 +1249,7 @@ func (d *Database) RecentEventsFiltered(limit int, since, project, source, tag s
 		q += " AND project_id = ?"
 		args = append(args, project)
 	}
-	if source != "" && source != "all" {
-		q += " AND source = ?"
-		args = append(args, source)
-	}
+	q, args = applySourceFilter(q, args, source)
 	if tag != "" && tag != "all" {
 		q += " AND (',' || tags || ',') LIKE ?"
 		args = append(args, "%,"+tag+",%")
@@ -1239,4 +1277,84 @@ func (d *Database) RecentEventsFiltered(limit int, since, project, source, tag s
 		events = append(events, e)
 	}
 	return events, rows.Err()
+}
+
+// migrateImportDedup makes re-running an import idempotent.
+//
+// The uniqueness index is partial so proxy rows, whose session_file and
+// entry_id are empty, are never affected. It is created after the schema and
+// after duplicates are collapsed: creating it against a database that already
+// imported the same session twice would fail and lock the daemon out.
+func migrateImportDedup(sqlDB *sql.DB) error {
+	tx, err := sqlDB.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	// Keep the oldest row of each duplicate group: its id preserves the order
+	// the original import produced, and cost is recomputed by the import
+	// engine rather than by this migration.
+	if _, err := tx.Exec(`DELETE FROM token_events
+		WHERE source LIKE 'import:%'
+		  AND session_file != ''
+		  AND entry_id != ''
+		  AND id NOT IN (
+			SELECT MIN(id) FROM token_events
+			WHERE source LIKE 'import:%' AND session_file != '' AND entry_id != ''
+			GROUP BY source, session_file, entry_id
+		  )`); err != nil {
+		return err
+	}
+
+	if _, err := tx.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_events_import_unique
+		ON token_events(source, session_file, entry_id)
+		WHERE source LIKE 'import:%'`); err != nil {
+		return err
+	}
+
+	return tx.Commit()
+}
+
+// migrateGuardReason adds the reason columns to a guard_events table created
+// before they existed. A table created by the current schema already has them,
+// so the ALTER is allowed to fail with the duplicate-column error.
+func migrateGuardReason(sqlDB *sql.DB) error {
+	for _, statement := range []string{
+		`ALTER TABLE guard_events ADD COLUMN message_code TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE guard_events ADD COLUMN message_params TEXT NOT NULL DEFAULT '{}'`,
+	} {
+		if _, err := sqlDB.Exec(statement); err != nil &&
+			!strings.Contains(err.Error(), "duplicate column name") {
+			return err
+		}
+	}
+	return nil
+}
+
+// sourceFilter renders the `source` dashboard filter.
+//
+// The dashboard offers "Imported" as one choice while the rows it selects are
+// stored per CLI as `import:claude`, `import:omp` and so on. Matching that
+// choice with equality silently returned nothing, so the bucket exists in the
+// filter and is always empty.
+func sourceFilter(source string) (clause string, arg interface{}, ok bool) {
+	if source == "" || source == "all" {
+		return "", nil, false
+	}
+	if source == "import" {
+		return " AND source LIKE 'import:%'", nil, true
+	}
+	return " AND source = ?", source, true
+}
+
+func applySourceFilter(q string, args []interface{}, source string) (string, []interface{}) {
+	clause, arg, ok := sourceFilter(source)
+	if !ok {
+		return q, args
+	}
+	if arg != nil {
+		args = append(args, arg)
+	}
+	return q + clause, args
 }

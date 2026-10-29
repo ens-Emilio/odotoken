@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"net"
@@ -13,13 +14,14 @@ import (
 	"strings"
 	"syscall"
 	"time"
+	"unicode"
 
 	"github.com/spf13/cobra"
 
 	"github.com/ens-Emilio/odotoken/internal/config"
 	"github.com/ens-Emilio/odotoken/internal/db"
-	"github.com/ens-Emilio/odotoken/internal/domain"
 	"github.com/ens-Emilio/odotoken/internal/importers"
+	"github.com/ens-Emilio/odotoken/internal/pricing"
 	"github.com/ens-Emilio/odotoken/internal/server"
 )
 
@@ -218,108 +220,173 @@ func newStatsCmd() *cobra.Command {
 
 func newImportCmd() *cobra.Command {
 	var (
-		since  string
-		dbPath string
+		since      string
+		dbPath     string
+		configPath string
+		clis       []string
+		dryRun     bool
+		jsonOut    bool
+		discover   bool
+		lang       string
 	)
 	cmd := &cobra.Command{
-		Use:   "import [cli]",
+		Use:   "import [cli...]",
 		Short: "Import usage data from CLI session files or databases",
-		Long: `Import historical usage data from supported CLIs:
-  omp      - OMP/Ghostcli stats.db (SQLite)
-  claude   - Claude CLI session files
-  codex    - Codex CLI session files
-  crush    - Crush session files
-  opencode - Opencode session files
-  pi       - Pi agent session files
+		Long: `Import historical usage data from supported CLIs.
+
+Without arguments every detected CLI is imported. Costs are recomputed from
+prices.json, so an import is consistent with what the proxy would have
+recorded for the same tokens.
 
 Examples:
-  odotoken import omp              # Import all OMP data
-  odotoken import omp --since 2024-01-01T00:00:00Z  # Import since date
-  odotoken import                  # Import from all available sources`,
-		Args: cobra.MaximumNArgs(1),
+  odotoken import                          # every detected CLI
+  odotoken import claude codex             # only these two
+  odotoken import --dry-run --json         # preview, machine-readable
+  odotoken import --since 2024-01-01T00:00:00Z
+  odotoken import --discover --json        # what is on this machine`,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			cfg, _ := config.Load(configPath)
+
+			var sinceTime time.Time
+			if since != "" {
+				t, err := time.Parse(time.RFC3339, since)
+				if err != nil {
+					return fmt.Errorf("invalid --since %q: use RFC3339, e.g. 2024-01-01T00:00:00Z", since)
+				}
+				sinceTime = t.UTC()
+			}
+
 			database, err := db.Open(dbPath)
 			if err != nil {
 				return fmt.Errorf("open database: %w", err)
 			}
 			defer database.Close()
 
-			registry := importers.NewRegistry()
-			cliFilter := ""
-			if len(args) > 0 {
-				cliFilter = args[0]
+			engine := importers.NewEngine(
+				importers.Paths(cfg.Sessions.Paths),
+				pricing.NewCalculator("prices.json"),
+				database,
+			)
+
+			selected := append(args, clis...)
+			if discover {
+				sources := engine.Discover(sinceTime)
+				importers.SortSources(sources)
+				if jsonOut {
+					return writeJSON(sources)
+				}
+				printSources(sources, cliLanguage(lang))
 			}
 
-			imported := 0
-			for _, imp := range registry.All() {
-				if cliFilter != "" && imp.Name() != cliFilter {
-					continue
-				}
-				if !imp.Detect() {
-					fmt.Printf("[skip] %s: not detected\n", imp.Name())
-					continue
-				}
-
-				scan := imp.Scan(since)
-				if !scan.Available {
-					fmt.Printf("[skip] %s: not available at %s\n", imp.Name(), scan.Path)
-					continue
-				}
-				fmt.Printf("[scan] %s: %d entries at %s\n", imp.Name(), scan.TotalEntries, scan.Path)
-
-				out := make(chan domain.RawUsage, 100)
-				go imp.IterUsages(since, out)
-
-				// Batch in chunks: one transaction per commit amortizes fsync,
-				// but an unbounded batch would hold the WAL write lock for the
-				// entire import and stall the proxy.
-				const batchSize = 500
-				batch := make([]domain.TokenEvent, 0, batchSize)
-				count := 0
-				flush := func() {
-					if len(batch) == 0 {
-						return
-					}
-					if err := database.InsertEvents(batch); err != nil {
-						fmt.Printf("[error] %s: failed to insert batch: %v\n", imp.Name(), err)
-					} else {
-						count += len(batch)
-					}
-					batch = batch[:0]
-				}
-
-				for usage := range out {
-					batch = append(batch, domain.TokenEvent{
-						Timestamp:        parseTimestamp(usage.Timestamp),
-						Provider:         usage.Provider,
-						Model:            usage.Model,
-						ClientApp:        usage.CLI,
-						PromptTokens:     usage.PromptTokens,
-						CompletionTokens: usage.CompletionTokens,
-						TotalTokens:      usage.PromptTokens + usage.CompletionTokens,
-						CacheReadTokens:  usage.CacheReadTokens,
-						CacheWriteTokens: usage.CacheWriteTokens,
-						CostUSD:          usage.RawCost,
-						ProjectID:        usage.Project,
-						Source:           "import:" + usage.CLI,
-						SessionID:        usage.SessionID,
-						SessionFile:      usage.SessionFile,
-						EntryID:          usage.EntryID,
-					})
-					if len(batch) >= batchSize {
-						flush()
-					}
-				}
-				flush()
-				imported += count
+			opts := importers.Options{CLIs: selected, Since: sinceTime, DryRun: dryRun}
+			if err := importers.ValidateOptions(opts, engine.Registry); err != nil {
+				return err
 			}
-			fmt.Printf("\nTotal: %d events imported\n", imported)
-			return nil
+
+			var progress importers.Progress
+			report, runErr := engine.Run(context.Background(), opts, func(p importers.Progress) {
+				progress = p
+				if !jsonOut {
+					fmt.Printf("\r[%d/%d] %s: %d scanned, %d new...", p.Index, p.Total, p.CLI, p.Scanned, p.Inserted)
+				}
+			})
+			if !jsonOut && progress.Total > 0 {
+				fmt.Println()
+			}
+
+			if !dryRun {
+				// A failed run record must not fail an import whose events landed.
+				_ = database.RecordImport(selected, report)
+			}
+
+			if jsonOut {
+				if err := writeJSON(report); err != nil {
+					return err
+				}
+			} else {
+				printReport(report, cliLanguage(lang))
+			}
+			return runErr
 		},
 	}
-	cmd.Flags().StringVar(&since, "since", "", "Import only events after this ISO8601 timestamp")
+	cmd.Flags().StringVar(&since, "since", "", "Import only events after this RFC3339 timestamp")
 	cmd.Flags().StringVar(&dbPath, "db", "odotoken.db", "database file path")
+	cmd.Flags().StringVar(&configPath, "config", "config.json", "config file path (for sessions.paths)")
+	cmd.Flags().StringSliceVar(&clis, "cli", nil, "CLI to import (repeatable)")
+	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Parse and price without writing")
+	cmd.Flags().BoolVar(&jsonOut, "json", false, "Emit JSON")
+	cmd.Flags().BoolVar(&discover, "discover", false, "List detected CLIs instead of importing")
+	cmd.Flags().StringVar(&lang, "lang", "", "Human output language (default: terminal locale; --json is never translated)")
 	return cmd
+}
+
+// pad fits a cell to a column width in display columns, not bytes: `%-10s`
+// counts bytes, so a Chinese or Hindi label leaves the table ragged.
+func pad(cell string, width int) string {
+	visible := 0
+	for _, r := range cell {
+		if unicode.Is(unicode.Mn, r) || unicode.Is(unicode.Me, r) {
+			continue // combining marks take no column of their own
+		}
+		if unicode.Is(unicode.Han, r) || unicode.Is(unicode.Hangul, r) ||
+			unicode.Is(unicode.Hiragana, r) || unicode.Is(unicode.Katakana, r) {
+			visible += 2
+			continue
+		}
+		visible++
+	}
+	if visible >= width {
+		return cell
+	}
+	return cell + strings.Repeat(" ", width-visible)
+}
+
+func padLeft(cell string, width int) string {
+	padded := pad(cell, width)
+	return strings.Repeat(" ", len([]rune(padded))-len([]rune(cell))) + cell
+}
+
+func printSources(sources []importers.Source, lang string) {
+	labels := cliLabelsFor(lang)
+	fmt.Printf("%s %s %s %s\n", pad("CLI", 10), pad(labels.status, 12), pad(labels.files, 10), "PATH")
+	for _, s := range sources {
+		status := labels.missing
+		if s.Available {
+			status = labels.ready
+		}
+		fmt.Printf("%s %s %s %s\n", pad(s.CLI, 10), pad(status, 12),
+			pad(strconv.Itoa(s.SessionFiles), 10), s.Path)
+	}
+}
+
+func printReport(r importers.Report, lang string) {
+	labels := cliLabelsFor(lang)
+	fmt.Printf("%s %s %s %s %s\n", pad("CLI", 10), padLeft(labels.scanned, 10),
+		padLeft(labels.new, 8), padLeft(labels.dupes, 8), padLeft(labels.cost, 12))
+	for _, c := range r.CLIs {
+		fmt.Printf("%s %s %s %s %s\n", pad(c.CLI, 10),
+			padLeft(strconv.Itoa(c.Scanned), 10), padLeft(strconv.Itoa(c.Inserted), 8),
+			padLeft(strconv.Itoa(c.Duplicates), 8), padLeft(fmt.Sprintf("%.4f", c.CostUSD), 12))
+		if c.Error != "" {
+			fmt.Printf("  %s\n", c.Error)
+		}
+	}
+	fmt.Printf("\n%s: %d %s, %d %s, %d %s, $%.4f\n", labels.total, r.Inserted, labels.new, r.Duplicates, labels.dupes, r.Tokens, labels.tokens, r.CostUSD)
+	if r.Unpriced > 0 {
+		fmt.Printf("%d %s\n", r.Unpriced, labels.unpriced)
+	}
+	if r.Status != "" && r.Status != "done" {
+		fmt.Printf("%s %s.\n", labels.importWord, r.Status)
+	}
+	if r.DryRun {
+		fmt.Println(labels.dryRun)
+	}
+}
+
+func writeJSON(v interface{}) error {
+	enc := json.NewEncoder(os.Stdout)
+	enc.SetIndent("", "  ")
+	return enc.Encode(v)
 }
 
 func parseTimestamp(ts string) time.Time {

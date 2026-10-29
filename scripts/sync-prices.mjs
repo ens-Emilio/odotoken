@@ -2,12 +2,11 @@
 /**
  * Sync model prices into odotoken prices.json.
  *
- * Sources (later entries win for the same model id):
- *   1. Pricing API (default http://154.29.76.173, override PEGASUS_PRICING_API)
- *      — public REST, 3,500+ models. Handles mixed per-token/per-1M
- *      conventions via magnitude heuristic; retries on rate limit.
+ *   1. Pricing API (override PRICING_API) — public REST, 3,500+ models.
+ *      Handles mixed per-token/per-1M conventions via magnitude heuristic;
+ *      retries on rate limit.
  *   2. crush providers.json (~/.local/share/crush/providers.json) — exact
- *      prices your local routers charge, highest priority.
+ *      prices the local router charges, highest priority.
  *
  * Entries with "override": true in prices.json are never touched.
  *
@@ -18,7 +17,7 @@ import { homedir } from 'os';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 
-const PRICING_API = process.env.PEGASUS_PRICING_API ?? 'http://154.29.76.173';
+const PRICING_API = process.env.PRICING_API ?? '';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = join(__dirname, '..');
@@ -108,31 +107,35 @@ async function main() {
       return res;
     }
   };
-  try {
-    const res = await fetchWithRetry(`${PRICING_API}/v1/models`);
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const models = await res.json();
-    // Deduplicate by bare id keeping the cheapest input price
-    const byBare = new Map();
-    for (const m of models) {
-      const p = parsePrice(m);
-      if (!p) continue;
-      const id = bareId(m.external_id);
-      const prev = byBare.get(id);
-      if (!prev || p.input < prev.input || (p.input === prev.input && p.output < prev.output)) {
-        byBare.set(id, p);
+  if (!PRICING_API) {
+    console.log('note: PRICING_API not set, skipping remote pricing');
+  } else {
+    try {
+      const res = await fetchWithRetry(`${PRICING_API}/v1/models`);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const models = await res.json();
+      // Deduplicate by bare id keeping the cheapest input price
+      const byBare = new Map();
+      for (const m of models) {
+        const p = parsePrice(m);
+        if (!p) continue;
+        const id = bareId(m.external_id);
+        const prev = byBare.get(id);
+        if (!prev || p.input < prev.input || (p.input === prev.input && p.output < prev.output)) {
+          byBare.set(id, p);
+        }
       }
-    }
-    for (const [id, p] of byBare) {
-      if (overridden.has(id)) continue;
-      // Don't downgrade a known non-free price to a free one
-      if (isFree(id) || !(id in prices)) {
-        setPrice(prices, id, p.input, p.output, prices[id]?.cache_read ?? 0);
-        stats.api++;
+      for (const [id, p] of byBare) {
+        if (overridden.has(id)) continue;
+        // Don't downgrade a known non-free price to a free one
+        if (isFree(id) || !(id in prices)) {
+          setPrice(prices, id, p.input, p.output, prices[id]?.cache_read ?? 0);
+          stats.api++;
+        }
       }
+    } catch (e) {
+      console.error(`warning: pricing API unreachable (${e.message}), continuing without it`);
     }
-  } catch (e) {
-    console.error(`warning: pricing API unreachable (${e.message}), continuing without it`);
   }
 
   // 2. crush providers.json — exact router prices (highest priority)
@@ -154,19 +157,8 @@ async function main() {
     console.log('note: crush providers.json not found, skipped');
   }
 
-  // 3. Pegasus Relay wrapper models (pegasus-claude-*) wrap official Claude
-  //    models — priced at the underlying Claude rates until the relay
-  //    publishes its own pricing. Override manually in prices.json if needed.
-  const pegasusWrappers = {
-    'pegasus-claude-speed':    [3.0, 15.0, 3.75, 18.75],  // sonnet-4-6
-    'pegasus-claude-ultra':    [5.0, 25.0, 6.25, 31.25],  // opus-4-6
-    'pegasus-claude-thinking': [5.0, 25.0, 6.25, 31.25],  // opus-4-6
-    'pegasus-haiku-flash':     [1.0, 5.0, 1.25, 6.25],   // haiku-4-5
-  };
-  for (const [id, [cin, cout, cr, cw]] of Object.entries(pegasusWrappers)) {
-    if (overridden.has(id)) continue;
-    prices[id] = { input: cin, output: cout, cache_read: cr, cache_write: cw };
-  }
+  // Models the pricing API does not publish can be pinned in prices.json with
+  // "override": true; they are never touched here.
 
   prices['default'] = prices['default'] ?? { input: 0, output: 0, cache_read: 0, cache_write: 0 };
 

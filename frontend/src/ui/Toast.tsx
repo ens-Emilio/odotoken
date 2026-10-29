@@ -22,7 +22,7 @@ export function ToastHost() {
   }
 
   return (
-    <div className="pointer-events-none fixed bottom-4 right-4 z-[60] flex flex-col gap-2">
+    <div className="pointer-events-none fixed bottom-4 end-4 z-[60] flex flex-col gap-2">
       <AnimatePresence>
         {items.map((t) => (
           <motion.div

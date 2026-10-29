@@ -91,12 +91,12 @@ export function Select({ value, onChange, options, placeholder = 'Select…', di
         aria-haspopup="listbox"
         disabled={disabled}
         onClick={() => !disabled && setOpen(v => !v)}
-        className="flex w-full items-center justify-between rounded-lg border border-[var(--border)] bg-[var(--bg-panel)] px-3 py-2 text-left text-[11px] font-medium text-[var(--text-strong)] outline-none focus:border-[var(--accent)] focus:ring-1 focus:ring-[var(--accent)] disabled:opacity-50"
+        className="flex w-full items-center justify-between rounded-lg border border-[var(--border)] bg-[var(--bg-panel)] px-3 py-2 text-start text-[11px] font-medium text-[var(--text-strong)] outline-none focus:border-[var(--accent)] focus:ring-1 focus:ring-[var(--accent)] disabled:opacity-50"
       >
         <span className={`block max-w-[180px] truncate ${selectedLabel ? '' : 'text-[var(--text-muted)]'}`}>
           {selectedLabel ?? placeholder}
         </span>
-        <svg className={`ml-2 h-3 w-3 shrink-0 text-[var(--text-muted)] transition-transform ${open ? 'rotate-180' : ''}`} viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="2">
+        <svg className={`ms-2 h-3 w-3 shrink-0 text-[var(--text-muted)] transition-transform ${open ? 'rotate-180' : ''}`} viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="2">
           <path d="M3 4.5L6 7.5L9 4.5" />
         </svg>
       </button>
@@ -105,7 +105,7 @@ export function Select({ value, onChange, options, placeholder = 'Select…', di
         <ul
           ref={listRef}
           role="listbox"
-          className={`select-dropdown-list absolute left-0 z-50 mt-1 max-h-60 overflow-auto rounded-lg border border-[var(--border)] bg-[var(--bg-elevated)] py-1 shadow-[var(--shadow-pop)] ${dropdownClassName ?? ''}`}
+          className={`select-dropdown-list absolute start-0 z-50 mt-1 max-h-60 overflow-auto rounded-lg border border-[var(--border)] bg-[var(--bg-elevated)] py-1 shadow-[var(--shadow-pop)] ${dropdownClassName ?? ''}`}
  style={{ maxWidth: '256px', width: '100%' }}
         >
           {grouped

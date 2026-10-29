@@ -16,12 +16,17 @@ import (
 )
 
 // ClaudeImporter imports from Claude CLI session files (~/.claude/projects/<hash>/<session>.jsonl).
-type ClaudeImporter struct{}
+type ClaudeImporter struct{ paths Paths }
 
 func (c *ClaudeImporter) Name() string { return "claude" }
 
+// root is the CLI data root, honoring sessions.paths.
+func (c *ClaudeImporter) root() string {
+	return c.paths.Resolve("claude", filepath.Join(homeDir(), ".claude", "projects"))
+}
+
 func (c *ClaudeImporter) Detect() bool {
-	p := filepath.Join(homeDir(), ".claude", "projects")
+	p := c.root()
 	info, err := os.Stat(p)
 	if err != nil || !info.IsDir() {
 		return false
@@ -30,27 +35,22 @@ func (c *ClaudeImporter) Detect() bool {
 	return len(entries) > 0
 }
 
-func (c *ClaudeImporter) Scan(since string) domain.ScanResult {
-	dir := filepath.Join(homeDir(), ".claude", "projects")
+func (c *ClaudeImporter) Scan(since time.Time) domain.ScanResult {
+	dir := c.root()
 	r := domain.ScanResult{CLI: "claude", Path: dir}
 	if !c.Detect() {
 		return r
 	}
-	count := 0
-	filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
-		if err == nil && !info.IsDir() && strings.HasSuffix(path, ".jsonl") {
-			count++
-		}
-		return nil
-	})
+	count, first, last := scanFiles(dir, ".jsonl", since)
 	r.Available = true
 	r.SessionFiles = count
+	r.FirstModified, r.LastModified = first, last
 	return r
 }
 
-func (c *ClaudeImporter) IterUsages(since string, out chan<- domain.RawUsage) {
+func (c *ClaudeImporter) IterUsages(since time.Time, out chan<- domain.RawUsage) {
 	defer close(out)
-	dir := filepath.Join(homeDir(), ".claude", "projects")
+	dir := c.root()
 	if !c.Detect() {
 		return
 	}
@@ -93,7 +93,7 @@ func (c *ClaudeImporter) IterUsages(since string, out chan<- domain.RawUsage) {
 				continue
 			}
 			ts, _ := obj["timestamp"].(string)
-			if since != "" && ts != "" && ts < since {
+			if beforeSince(ts, since) {
 				continue
 			}
 			model := strOr(msg, "model", strOr(obj, "model", "unknown"))
@@ -128,37 +128,37 @@ func (c *ClaudeImporter) IterUsages(since string, out chan<- domain.RawUsage) {
 }
 
 // CodexImporter imports from Codex CLI session files (~/.codex/sessions/**/*.jsonl).
-type CodexImporter struct{}
+type CodexImporter struct{ paths Paths }
 
 func (c *CodexImporter) Name() string { return "codex" }
 
+// root is the CLI data root, honoring sessions.paths.
+func (c *CodexImporter) root() string {
+	return c.paths.Resolve("codex", filepath.Join(homeDir(), ".codex", "sessions"))
+}
+
 func (c *CodexImporter) Detect() bool {
-	p := filepath.Join(homeDir(), ".codex", "sessions")
+	p := c.root()
 	_, err := os.Stat(p)
 	return err == nil
 }
 
-func (c *CodexImporter) Scan(since string) domain.ScanResult {
-	dir := filepath.Join(homeDir(), ".codex", "sessions")
+func (c *CodexImporter) Scan(since time.Time) domain.ScanResult {
+	dir := c.root()
 	r := domain.ScanResult{CLI: "codex", Path: dir}
 	if _, err := os.Stat(dir); err != nil {
 		return r
 	}
-	count := 0
-	filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
-		if err == nil && !info.IsDir() && strings.HasSuffix(path, ".jsonl") {
-			count++
-		}
-		return nil
-	})
+	count, first, last := scanFiles(dir, ".jsonl", since)
 	r.Available = true
 	r.SessionFiles = count
+	r.FirstModified, r.LastModified = first, last
 	return r
 }
 
-func (c *CodexImporter) IterUsages(since string, out chan<- domain.RawUsage) {
+func (c *CodexImporter) IterUsages(since time.Time, out chan<- domain.RawUsage) {
 	defer close(out)
-	dir := filepath.Join(homeDir(), ".codex", "sessions")
+	dir := c.root()
 	if _, err := os.Stat(dir); err != nil {
 		return
 	}
@@ -218,7 +218,7 @@ func (c *CodexImporter) IterUsages(since string, out chan<- domain.RawUsage) {
 					continue
 				}
 				ts, _ := obj["timestamp"].(string)
-				if since != "" && ts != "" && ts < since {
+				if beforeSince(ts, since) {
 					continue
 				}
 				model := strOr(payload, "model", firstNonEmpty(modelHint, providerHint, "unknown"))
@@ -249,61 +249,65 @@ func (c *CodexImporter) IterUsages(since string, out chan<- domain.RawUsage) {
 	})
 }
 
-// OmpImporter imports from OMP/Ghostcli session JSONL files (~/.omp/agent/sessions/**/*.jsonl).
-type OmpImporter struct{}
+// OmpImporter imports from OMP session JSONL files (~/.omp/agent/sessions/**/*.jsonl).
+type OmpImporter struct{ paths Paths }
 
 func (o *OmpImporter) Name() string { return "omp" }
 
+// root is the CLI data root, honoring sessions.paths.
+func (o *OmpImporter) root() string {
+	return o.paths.Resolve("omp", filepath.Join(homeDir(), ".omp", "agent", "sessions"))
+}
+
 func (o *OmpImporter) Detect() bool {
-	p := filepath.Join(homeDir(), ".omp", "agent", "sessions")
+	p := o.root()
 	info, err := os.Stat(p)
 	return err == nil && info.IsDir()
 }
 
-func (o *OmpImporter) Scan(since string) domain.ScanResult {
-	sessionsDir := filepath.Join(homeDir(), ".omp", "agent", "sessions")
+func (o *OmpImporter) Scan(since time.Time) domain.ScanResult {
+	sessionsDir := o.root()
 	if !o.Detect() {
 		return domain.ScanResult{CLI: "omp", Available: false, Path: sessionsDir}
 	}
 
-	var totalFiles, totalEntries int
+	var totalFiles int
+	var first, last time.Time
 	filepath.WalkDir(sessionsDir, func(path string, d os.DirEntry, err error) error {
 		if err != nil || d.IsDir() || !strings.HasSuffix(path, ".jsonl") {
 			return nil
 		}
-		totalFiles++
-		// Count model_usage events in this file
-		data, err := os.ReadFile(path)
-		if err != nil {
-			return nil
-		}
-		for _, line := range strings.Split(string(data), "\n") {
-			if strings.Contains(line, `"type":"model_usage"`) && strings.Contains(line, `"totalTokens":`) {
-				totalEntries++
+		if info, statErr := d.Info(); statErr == nil {
+			if !since.IsZero() && info.ModTime().Before(since) {
+				return nil
+			}
+			mt := info.ModTime()
+			if first.IsZero() || mt.Before(first) {
+				first = mt
+			}
+			if mt.After(last) {
+				last = mt
 			}
 		}
+		totalFiles++
 		return nil
 	})
 
 	return domain.ScanResult{
-		CLI:          "omp",
-		Available:    true,
-		SessionFiles: totalFiles,
-		TotalEntries: totalEntries,
-		Path:         sessionsDir,
+		CLI:           "omp",
+		Available:     true,
+		SessionFiles:  totalFiles,
+		Path:          sessionsDir,
+		FirstModified: first,
+		LastModified:  last,
 	}
 }
 
-func (o *OmpImporter) IterUsages(since string, out chan<- domain.RawUsage) {
+func (o *OmpImporter) IterUsages(since time.Time, out chan<- domain.RawUsage) {
 	defer close(out)
-	sessionsDir := filepath.Join(homeDir(), ".omp", "agent", "sessions")
+	sessionsDir := o.root()
 	if !o.Detect() {
 		return
-	}
-
-	var sinceTime time.Time
-	if since != "" {
-		sinceTime, _ = time.Parse(time.RFC3339, since)
 	}
 
 	filepath.WalkDir(sessionsDir, func(path string, d os.DirEntry, err error) error {
@@ -357,7 +361,7 @@ func (o *OmpImporter) IterUsages(since string, out chan<- domain.RawUsage) {
 				}
 			}
 
-			if !sinceTime.IsZero() && ts.Before(sinceTime) {
+			if !since.IsZero() && ts.Before(since) {
 				continue
 			}
 
@@ -408,18 +412,23 @@ func (o *OmpImporter) IterUsages(since string, out chan<- domain.RawUsage) {
 }
 
 // CrushImporter imports from Crush session files resolved via projects.json.
-type CrushImporter struct{}
+type CrushImporter struct{ paths Paths }
 
 func (c *CrushImporter) Name() string { return "crush" }
 
+// root is the CLI data root, honoring sessions.paths.
+func (c *CrushImporter) root() string {
+	return c.paths.Resolve("crush", filepath.Join(homeDir(), ".local", "share", "crush", "projects.json"))
+}
+
 func (c *CrushImporter) Detect() bool {
-	p := filepath.Join(homeDir(), ".local", "share", "crush", "projects.json")
+	p := c.root()
 	_, err := os.Stat(p)
 	return err == nil
 }
 
 func (c *CrushImporter) crushDataDirs() []string {
-	p := filepath.Join(homeDir(), ".local", "share", "crush", "projects.json")
+	p := c.root()
 	data, err := os.ReadFile(p)
 	if err != nil {
 		return nil
@@ -441,8 +450,8 @@ func (c *CrushImporter) crushDataDirs() []string {
 	return dirs
 }
 
-func (c *CrushImporter) Scan(since string) domain.ScanResult {
-	pjPath := filepath.Join(homeDir(), ".local", "share", "crush", "projects.json")
+func (c *CrushImporter) Scan(since time.Time) domain.ScanResult {
+	pjPath := c.root()
 	r := domain.ScanResult{CLI: "crush", Path: pjPath}
 	if !c.Detect() {
 		return r
@@ -458,10 +467,25 @@ func (c *CrushImporter) Scan(since string) domain.ScanResult {
 	}
 	r.Available = true
 	r.SessionFiles = len(seen)
+	var first, last time.Time
+	for path := range seen {
+		info, err := os.Stat(path)
+		if err != nil {
+			continue
+		}
+		mt := info.ModTime()
+		if first.IsZero() || mt.Before(first) {
+			first = mt
+		}
+		if mt.After(last) {
+			last = mt
+		}
+	}
+	r.FirstModified, r.LastModified = first, last
 	return r
 }
 
-func (c *CrushImporter) IterUsages(since string, out chan<- domain.RawUsage) {
+func (c *CrushImporter) IterUsages(since time.Time, out chan<- domain.RawUsage) {
 	defer close(out)
 	if !c.Detect() {
 		return
@@ -511,7 +535,7 @@ func (c *CrushImporter) IterUsages(since string, out chan<- domain.RawUsage) {
 					continue
 				}
 				ts := strOr(obj, "timestamp", strOr(msg, "timestamp", ""))
-				if since != "" && ts != "" && ts < since {
+				if beforeSince(ts, since) {
 					continue
 				}
 				model := strOr(msg, "model", strOr(obj, "model", "unknown"))
@@ -542,18 +566,23 @@ func (c *CrushImporter) IterUsages(since string, out chan<- domain.RawUsage) {
 }
 
 // OpencodeImporter imports from opencode SQLite DB (~/.local/share/opencode/opencode.db).
-type OpencodeImporter struct{}
+type OpencodeImporter struct{ paths Paths }
 
 func (o *OpencodeImporter) Name() string { return "opencode" }
 
+// root is the CLI data root, honoring sessions.paths.
+func (o *OpencodeImporter) root() string {
+	return o.paths.Resolve("opencode", filepath.Join(homeDir(), ".local", "share", "opencode", "opencode.db"))
+}
+
 func (o *OpencodeImporter) Detect() bool {
-	p := filepath.Join(homeDir(), ".local", "share", "opencode", "opencode.db")
+	p := o.root()
 	_, err := os.Stat(p)
 	return err == nil
 }
 
-func (o *OpencodeImporter) Scan(since string) domain.ScanResult {
-	dbPath := filepath.Join(homeDir(), ".local", "share", "opencode", "opencode.db")
+func (o *OpencodeImporter) Scan(since time.Time) domain.ScanResult {
+	dbPath := o.root()
 	r := domain.ScanResult{CLI: "opencode", Path: dbPath}
 	if !o.Detect() {
 		return r
@@ -568,14 +597,22 @@ func (o *OpencodeImporter) Scan(since string) domain.ScanResult {
 	if err := conn.QueryRow("SELECT COUNT(*) FROM message").Scan(&total); err == nil {
 		r.TotalEntries = total
 	}
+	var firstMs, lastMs sql.NullInt64
+	_ = conn.QueryRow("SELECT MIN(time_created), MAX(time_created) FROM message").Scan(&firstMs, &lastMs)
+	if firstMs.Valid {
+		r.FirstModified = time.UnixMilli(firstMs.Int64).UTC()
+	}
+	if lastMs.Valid {
+		r.LastModified = time.UnixMilli(lastMs.Int64).UTC()
+	}
 	r.Available = true
 	r.SessionFiles = 1
 	return r
 }
 
-func (o *OpencodeImporter) IterUsages(since string, out chan<- domain.RawUsage) {
+func (o *OpencodeImporter) IterUsages(since time.Time, out chan<- domain.RawUsage) {
 	defer close(out)
-	dbPath := filepath.Join(homeDir(), ".local", "share", "opencode", "opencode.db")
+	dbPath := o.root()
 	if !o.Detect() {
 		return
 	}
@@ -587,12 +624,9 @@ func (o *OpencodeImporter) IterUsages(since string, out chan<- domain.RawUsage) 
 
 	query := "SELECT id, session_id, time_created, data FROM message"
 	var args []interface{}
-	if since != "" {
-		t, err := time.Parse(time.RFC3339, since)
-		if err == nil {
-			query += " WHERE time_created >= ?"
-			args = append(args, t.UnixMilli())
-		}
+	if !since.IsZero() {
+		query += " WHERE time_created >= ?"
+		args = append(args, since.UnixMilli())
 	}
 	query += " ORDER BY time_created ASC"
 
@@ -627,7 +661,7 @@ func (o *OpencodeImporter) IterUsages(since string, out chan<- domain.RawUsage) 
 		if timeCreated.Valid {
 			ts = time.UnixMilli(timeCreated.Int64).UTC().Format(time.RFC3339)
 		}
-		if since != "" && ts != "" && ts < since {
+		if beforeSince(ts, since) {
 			continue
 		}
 		cache, _ := tokens["cache"].(map[string]interface{})
@@ -667,129 +701,6 @@ func (o *OpencodeImporter) IterUsages(since string, out chan<- domain.RawUsage) 
 			RawCost:          rawCost,
 		}
 	}
-}
-
-// PiImporter imports from Pi agent session files (~/.pi/agent/sessions/**/*.jsonl).
-type PiImporter struct{}
-
-func (p *PiImporter) Name() string { return "pi" }
-
-func (p *PiImporter) Detect() bool {
-	dir := filepath.Join(homeDir(), ".pi", "agent", "sessions")
-	info, err := os.Stat(dir)
-	if err != nil || !info.IsDir() {
-		return false
-	}
-	found := false
-	filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
-		if !found && err == nil && !info.IsDir() && strings.HasSuffix(path, ".jsonl") {
-			found = true
-		}
-		return nil
-	})
-	return found
-}
-
-func (p *PiImporter) Scan(since string) domain.ScanResult {
-	dir := filepath.Join(homeDir(), ".pi", "agent", "sessions")
-	r := domain.ScanResult{CLI: "pi", Path: dir}
-	if !p.Detect() {
-		return r
-	}
-	count := 0
-	filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
-		if err == nil && !info.IsDir() && strings.HasSuffix(path, ".jsonl") {
-			count++
-		}
-		return nil
-	})
-	r.Available = true
-	r.SessionFiles = count
-	return r
-}
-
-func (p *PiImporter) IterUsages(since string, out chan<- domain.RawUsage) {
-	defer close(out)
-	dir := filepath.Join(homeDir(), ".pi", "agent", "sessions")
-	if _, err := os.Stat(dir); err != nil {
-		return
-	}
-	filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
-		if err != nil || info.IsDir() || !strings.HasSuffix(path, ".jsonl") {
-			return nil
-		}
-		base := strings.TrimSuffix(info.Name(), ".jsonl")
-		sessionID := base
-		if idx := strings.LastIndex(base, "_"); idx >= 0 {
-			sessionID = base[idx+1:]
-		}
-		project := piProjectFromDir(filepath.Dir(path))
-		f, ferr := os.Open(path)
-		if ferr != nil {
-			return nil
-		}
-		defer f.Close()
-		scanner := bufio.NewScanner(f)
-		scanner.Buffer(make([]byte, 0, 1024*1024), 10*1024*1024)
-		idx := 0
-		for scanner.Scan() {
-			line := strings.TrimSpace(scanner.Text())
-			if line == "" {
-				continue
-			}
-			var obj map[string]interface{}
-			if json.Unmarshal([]byte(line), &obj) != nil {
-				continue
-			}
-			if obj["type"] != "message" {
-				continue
-			}
-			msg, _ := obj["message"].(map[string]interface{})
-			if msg == nil {
-				continue
-			}
-			if msg["role"] != "assistant" {
-				continue
-			}
-			usage, _ := msg["usage"].(map[string]interface{})
-			if usage == nil {
-				continue
-			}
-			ts, _ := obj["timestamp"].(string)
-			if since != "" && ts != "" && ts < since {
-				continue
-			}
-			model := strOr(msg, "model", "unknown")
-			provider := strOr(msg, "provider", "unknown")
-			eid := strOr(msg, "responseId", "")
-			if eid == "" {
-				eid = fmt.Sprintf("%s:%d", path, idx)
-			}
-			rawCost := 0.0
-			if costMap, ok := usage["cost"].(map[string]interface{}); ok {
-				if total, ok := costMap["total"].(float64); ok {
-					rawCost = total
-				}
-			}
-			out <- domain.RawUsage{
-				CLI:              "pi",
-				SessionID:        sessionID,
-				SessionFile:      path,
-				EntryID:          eid,
-				Timestamp:        ts,
-				Provider:         provider,
-				Model:            model,
-				PromptTokens:     toInt(usage, "input"),
-				CompletionTokens: toInt(usage, "output"),
-				CacheReadTokens:  toInt(usage, "cacheRead"),
-				CacheWriteTokens: toInt(usage, "cacheWrite"),
-				Project:          project,
-				RawCost:          rawCost,
-			}
-			idx++
-		}
-		return nil
-	})
 }
 
 func homeDir() string {

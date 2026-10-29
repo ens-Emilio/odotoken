@@ -3,6 +3,7 @@ package pricing
 import (
 	"encoding/json"
 	"os"
+	"path/filepath"
 	"strings"
 )
 
@@ -34,21 +35,43 @@ type Calculator struct {
 	prices map[string]ModelRates
 }
 
-// NewCalculator creates a calculator, loading overrides from priceFile if it exists.
+// NewCalculator creates a calculator, loading overrides from priceFile if it
+// exists. A relative path that is missing from the working directory is looked
+// up next to the executable: a service started by systemd or a dashboard run
+// from another directory must price identically to one started from the repo,
+// and silently falling back to the built-in table turned every imported cost
+// into $0.
 func NewCalculator(priceFile string) *Calculator {
 	c := &Calculator{prices: make(map[string]ModelRates, len(defaultPrices))}
 	for k, v := range defaultPrices {
 		c.prices[k] = v
 	}
-	if priceFile != "" {
-		if data, err := os.ReadFile(priceFile); err == nil {
-			var overrides map[string]ModelRates
-			if json.Unmarshal(data, &overrides) == nil {
-				for k, v := range overrides {
-					c.prices[k] = v
+	if priceFile == "" {
+		return c
+	}
+	data, err := os.ReadFile(priceFile)
+	if err != nil && !filepath.IsAbs(priceFile) {
+		if exe, exeErr := os.Executable(); exeErr == nil {
+			candidates := []string{
+				filepath.Join(filepath.Dir(exe), priceFile),
+				filepath.Join(filepath.Dir(exe), "..", priceFile),
+			}
+			for _, candidate := range candidates {
+				if data, err = os.ReadFile(candidate); err == nil {
+					break
 				}
 			}
 		}
+	}
+	if err != nil {
+		return c
+	}
+	var overrides map[string]ModelRates
+	if json.Unmarshal(data, &overrides) != nil {
+		return c
+	}
+	for k, v := range overrides {
+		c.prices[k] = v
 	}
 	return c
 }

@@ -66,21 +66,31 @@ type ScanResult struct {
 	SessionFiles int    `json:"session_files"`
 	TotalEntries int    `json:"total_entries"`
 	Path         string `json:"path"`
+	// FirstModified and LastModified bound what the files on disk can cover.
+	// Session files carry no reliable global order, so mtime is the only
+	// coverage signal available without parsing every file.
+	FirstModified time.Time `json:"first_modified,omitempty"`
+	LastModified  time.Time `json:"last_modified,omitempty"`
 }
 
 // GuardCheckResult holds the result of a budget guard check.
 type GuardCheckResult struct {
-	Allowed             bool    `json:"allowed"`
-	Status              string  `json:"status"` // "ok", "warning", "breached"
-	Message             string  `json:"message"`
-	CurrentDailyCost    float64 `json:"current_daily_cost"`
-	DailyLimit          float64 `json:"daily_limit"`
-	CurrentMonthlyCost  float64 `json:"current_monthly_cost"`
-	MonthlyLimit        float64 `json:"monthly_limit"`
-	CurrentDailyTokens  int     `json:"current_daily_tokens"`
-	CurrentMonthTokens  int     `json:"current_monthly_tokens"`
-	DailyTokensLimit    int     `json:"daily_tokens_limit"`
-	MonthlyTokensLimit  int     `json:"monthly_tokens_limit"`
-	WarningThresholdPct float64 `json:"warning_threshold_pct"`
-	ActionOnBreach      string  `json:"action_on_breach"`
+	Allowed bool   `json:"allowed"`
+	Status  string `json:"status"` // "ok", "warning", "breached"
+	// Message is the server's own English prose, kept for logs and alert
+	// payloads. Clients render ReasonCode/ReasonParams instead: the server does
+	// not choose the reader's language.
+	Message             string            `json:"message"`
+	ReasonCode          string            `json:"reason_code,omitempty"`
+	ReasonParams        map[string]string `json:"reason_params,omitempty"`
+	CurrentDailyCost    float64           `json:"current_daily_cost"`
+	DailyLimit          float64           `json:"daily_limit"`
+	CurrentMonthlyCost  float64           `json:"current_monthly_cost"`
+	MonthlyLimit        float64           `json:"monthly_limit"`
+	CurrentDailyTokens  int               `json:"current_daily_tokens"`
+	CurrentMonthTokens  int               `json:"current_monthly_tokens"`
+	DailyTokensLimit    int               `json:"daily_tokens_limit"`
+	MonthlyTokensLimit  int               `json:"monthly_tokens_limit"`
+	WarningThresholdPct float64           `json:"warning_threshold_pct"`
+	ActionOnBreach      string            `json:"action_on_breach"`
 }

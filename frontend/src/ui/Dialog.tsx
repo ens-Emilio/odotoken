@@ -1,8 +1,10 @@
 import { useEffect, useRef, type ReactNode } from 'react'
 import { AnimatePresence, motion } from 'motion/react'
 import { X } from 'lucide-react'
+import { useLocale } from '../i18n/useLocale'
 
 export function Dialog({ open, onClose, title, children }: { open: boolean; onClose: () => void; title: string; children: ReactNode }) {
+  const { t } = useLocale()
   const closeBtnRef = useRef<HTMLButtonElement>(null)
   useEffect(() => {
     if (!open) return
@@ -54,7 +56,7 @@ export function Dialog({ open, onClose, title, children }: { open: boolean; onCl
               <h3 id="dialog-title" className="text-[13px] font-semibold text-[var(--text-strong)]">{title}</h3>
               <button
                 ref={closeBtnRef}
-                aria-label="Close dialog"
+                aria-label={t('common.close')}
                 className="rounded-md p-1 text-[var(--text-soft)] hover:bg-[var(--bg-fill-secondary)] hover:text-[var(--text-strong)] focus:outline-none focus:ring-2 focus:ring-[var(--brand)]"
                 onClick={onClose}
               >

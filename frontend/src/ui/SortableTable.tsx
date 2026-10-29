@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react'
 import { ArrowDown, ArrowUp, ChevronsUpDown } from 'lucide-react'
+import { useLocale } from '../i18n/useLocale'
 
 export interface Column<T> {
   key: string
@@ -20,6 +21,7 @@ export function SortableTable<T>({ rows, columns, pageSize = 25, rowKey, onRowCl
   searchable?: boolean
   searchKeys?: (keyof T)[]
 }) {
+  const { t, locale } = useLocale()
   const [filter, setFilter] = useState('')
   const filtered = useMemo(() => {
     if (!filter || !searchKeys?.length) return rows
@@ -50,6 +52,11 @@ export function SortableTable<T>({ rows, columns, pageSize = 25, rowKey, onRowCl
 
   const onFilterChange = (value: string) => { setFilter(value); setPage(0) }
 
+  const plural = (count: number, key: 'table.rows' | 'table.filtered'): string => {
+    const rule = new Intl.PluralRules(locale).select(count)
+    return t(`${key}.${rule === 'one' ? 'one' : 'other'}`, { count })
+  }
+
   const toggleSort = (key: string) => {
     setPage(0)
     if (sortKey === key) {
@@ -64,13 +71,13 @@ export function SortableTable<T>({ rows, columns, pageSize = 25, rowKey, onRowCl
     <div>
       {searchable && searchKeys?.length ? (
         <div className="flex items-center gap-2 px-3 py-2 border-b border-[var(--border-soft)]">
-          <input value={filter} onChange={(e) => onFilterChange(e.target.value)} placeholder="Filter…" aria-label="Filter table" className="w-full max-w-xs rounded-md border border-[var(--border)] bg-[var(--bg)] px-2.5 py-1.5 text-[12px] placeholder:text-[var(--text-faint)] focus:outline-none focus:ring-2 focus:ring-[var(--brand)]" />
-          {filter && <button onClick={() => onFilterChange('')} className="text-[11px] text-[var(--text-soft)] hover:text-[var(--text-strong)]">Clear</button>}
-          <span className="ml-auto text-[11px] text-[var(--text-faint)]">{filtered.length !== rows.length ? `${filtered.length}/${rows.length} rows` : `${rows.length} rows`}</span>
+          <input value={filter} onChange={(e) => onFilterChange(e.target.value)} placeholder={t('common.filter')} aria-label={t('common.filterTable')} className="w-full max-w-xs rounded-md border border-[var(--border)] bg-[var(--bg)] px-2.5 py-1.5 text-[12px] placeholder:text-[var(--text-faint)] focus:outline-none focus:ring-2 focus:ring-[var(--brand)]" />
+          {filter && <button onClick={() => onFilterChange('')} className="text-[11px] text-[var(--text-soft)] hover:text-[var(--text-strong)]">{t('common.clear')}</button>}
+          <span className="ms-auto text-[11px] text-[var(--text-faint)]">{filtered.length !== rows.length ? plural(filtered.length, 'table.filtered') : plural(rows.length, 'table.rows')}</span>
         </div>
       ) : null}
       <div className="table-scroll overflow-x-auto">
-        <table className="w-full text-left text-[12px]">
+        <table className="w-full text-start text-[12px]">
           <thead>
             <tr className="border-b border-[var(--border)]">
               {columns.map((col) => (
@@ -86,7 +93,7 @@ export function SortableTable<T>({ rows, columns, pageSize = 25, rowKey, onRowCl
                       toggleSort(col.key)
                     }
                   } : undefined}
-                  className={`py-2.5 px-3 text-[11px] font-medium uppercase tracking-wider ${col.align === 'right' ? 'text-right' : 'text-left'} ${col.sortValue ? 'cursor-pointer select-none focus:outline-none focus:ring-2 focus:ring-[var(--brand)]' : ''} ${sortKey === col.key ? 'text-[var(--text-strong)]' : 'text-[var(--text-soft)] hover:text-[var(--text-strong)]'} ${col.width ?? ''}`}
+                  className={`py-2.5 px-3 text-[11px] font-medium uppercase tracking-wider ${col.align === 'right' ? 'text-end' : 'text-start'} ${col.sortValue ? 'cursor-pointer select-none focus:outline-none focus:ring-2 focus:ring-[var(--brand)]' : ''} ${sortKey === col.key ? 'text-[var(--text-strong)]' : 'text-[var(--text-soft)] hover:text-[var(--text-strong)]'} ${col.width ?? ''}`}
                   onClick={col.sortValue ? () => toggleSort(col.key) : undefined}
                 >
                   <span className={`inline-flex items-center gap-1 ${col.align === 'right' ? 'flex-row-reverse' : ''}`}>
@@ -103,7 +110,7 @@ export function SortableTable<T>({ rows, columns, pageSize = 25, rowKey, onRowCl
           </thead>
           <tbody className="divide-y divide-[var(--border-soft)] text-[var(--text)]">
             {pageRows.length === 0 ? (
-              <tr><td colSpan={columns.length} className="py-8 text-center text-[12px] text-[var(--text-soft)]">No records found</td></tr>
+              <tr><td colSpan={columns.length} className="py-8 text-center text-[12px] text-[var(--text-soft)]">{t('common.noRecords')}</td></tr>
             ) : pageRows.map((row) => (
               <tr
                 key={rowKey(row)}
@@ -118,7 +125,7 @@ export function SortableTable<T>({ rows, columns, pageSize = 25, rowKey, onRowCl
                 onClick={onRowClick ? () => onRowClick(row) : undefined}
               >
                 {columns.map((col) => (
-                  <td key={col.key} className={`py-3 px-3 ${col.align === 'right' ? 'text-right tabular-nums' : ''}`}>
+                  <td key={col.key} className={`py-3 px-3 ${col.align === 'right' ? 'text-end tabular-nums' : ''}`}>
                     {col.render(row)}
                   </td>
                 ))}
@@ -129,11 +136,11 @@ export function SortableTable<T>({ rows, columns, pageSize = 25, rowKey, onRowCl
       </div>
       {sorted.length > pageSize && (
         <div className="flex items-center justify-between border-t border-[var(--border-soft)] px-3 py-2 text-[11px] text-[var(--text-soft)]">
-          <span className="num">{sorted.length} rows · page {safePage + 1} of {pageCount}</span>
+          <span className="num">{plural(sorted.length, 'table.rows')}</span>
           <div className="flex items-center gap-1">
-            <button className="flex h-7 w-7 items-center justify-center rounded-md border border-[var(--border)] hover:bg-[var(--bg-fill-secondary)] disabled:opacity-30" disabled={safePage === 0} onClick={() => setPage(safePage - 1)} aria-label="Previous page">‹</button>
+            <button className="flex h-7 w-7 items-center justify-center rounded-md border border-[var(--border)] hover:bg-[var(--bg-fill-secondary)] disabled:opacity-30" disabled={safePage === 0} onClick={() => setPage(safePage - 1)} aria-label={t('common.previousPage')}><span className="rtl:rotate-180">‹</span></button>
             <span className="num px-1">{safePage + 1} / {pageCount}</span>
-            <button className="flex h-7 w-7 items-center justify-center rounded-md border border-[var(--border)] hover:bg-[var(--bg-fill-secondary)] disabled:opacity-30" disabled={safePage >= pageCount - 1} onClick={() => setPage(safePage + 1)} aria-label="Next page">›</button>
+            <button className="flex h-7 w-7 items-center justify-center rounded-md border border-[var(--border)] hover:bg-[var(--bg-fill-secondary)] disabled:opacity-30" disabled={safePage >= pageCount - 1} onClick={() => setPage(safePage + 1)} aria-label={t('common.nextPage')}><span className="rtl:rotate-180">›</span></button>
           </div>
         </div>
       )}

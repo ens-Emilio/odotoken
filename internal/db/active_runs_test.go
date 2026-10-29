@@ -12,7 +12,7 @@ func TestActiveRunLifecycleAndOrphanExpiry(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer d.Close()
-	if err := d.StartActiveRun("run-a", "session-a", "omp", "ghostcli", "claude-sonnet-5", "project"); err != nil {
+	if err := d.StartActiveRun("run-a", "session-a", "omp", "relay", "claude-sonnet-5", "project"); err != nil {
 		t.Fatal(err)
 	}
 	live, err := d.GetLiveSessions()
@@ -32,7 +32,7 @@ func TestActiveRunLifecycleAndOrphanExpiry(t *testing.T) {
 	if len(live) != 0 {
 		t.Fatalf("finished run still live: %+v", live)
 	}
-	if err := d.StartActiveRun("orphan", "orphan-session", "omp", "ghostcli", "claude-sonnet-5", "project"); err != nil {
+	if err := d.StartActiveRun("orphan", "orphan-session", "omp", "relay", "claude-sonnet-5", "project"); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := d.db.Exec(`UPDATE active_runs SET last_activity=? WHERE run_id='orphan'`, time.Now().UTC().Add(-11*time.Minute).Format(time.RFC3339Nano)); err != nil {
@@ -56,10 +56,10 @@ func TestConcurrentRunsShareSessionID(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer d.Close()
-	if err := d.StartActiveRun("run-1", "conversation", "omp", "kodeo", "m1", "p"); err != nil {
+	if err := d.StartActiveRun("run-1", "conversation", "omp", "relay", "m1", "p"); err != nil {
 		t.Fatal(err)
 	}
-	if err := d.StartActiveRun("run-2", "conversation", "omp", "kodeo", "m2", "p"); err != nil {
+	if err := d.StartActiveRun("run-2", "conversation", "omp", "relay", "m2", "p"); err != nil {
 		t.Fatal(err)
 	}
 	runs, err := d.GetLiveSessions()
