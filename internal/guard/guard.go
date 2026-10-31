@@ -4,11 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
-	"net"
 	"net/http"
-	"net/smtp"
 	"strconv"
-	"strings"
 	"sync"
 	"time"
 
@@ -28,6 +25,7 @@ type Guard struct {
 	alertMu      sync.Mutex
 	lastAlertKey string
 	httpClient   *http.Client
+	wake         chan struct{}
 }
 
 // New creates a new Guard.
@@ -38,6 +36,7 @@ func New(database *db.Database, limits config.GuardConfig, alerts config.AlertsC
 		alerts:     alerts,
 		logger:     logger,
 		httpClient: &http.Client{Timeout: 10 * time.Second},
+		wake:       make(chan struct{}, 1),
 	}
 }
 
@@ -67,11 +66,41 @@ func (g *Guard) UpdateLimits(limits config.GuardConfig) {
 // stop on unreadable budgets is ever wanted, it belongs behind an explicit
 // config switch rather than as an implicit consequence of a disk error.
 func (g *Guard) Check(projectID string) domain.GuardCheckResult {
-	limits := g.Limits()
-	loc, err := time.LoadLocation(limits.Timezone)
+	return g.check(projectID, "", g.Limits().ForProject(projectID), config.GuardConfig{})
+}
+
+// CheckWithQuota applies a per-client-key quota on top of the project limits.
+// The two are measured separately because they answer different questions: the
+// project limits apply to everything the project spent, the quota to what this
+// key spent inside it. Measuring both against one window let a key without a
+// quota ignore a project that was already over budget, so each check gets its
+// own numbers and the worse outcome wins.
+func (g *Guard) CheckWithQuota(projectID, clientApp string, quota config.GuardConfig) domain.GuardCheckResult {
+	return g.check(projectID, clientApp, g.Limits().ForProject(projectID), quota)
+}
+
+// hasBudget reports whether a key quota constrains anything.
+func hasBudget(limits config.GuardConfig) bool {
+	return limits.DailyCostLimitUSD > 0 || limits.MonthlyCostLimitUSD > 0 ||
+		limits.DailyTokenLimit > 0 || limits.MonthlyTokenLimit > 0
+}
+
+// severity orders guard outcomes so two independent checks can be compared.
+func severity(r domain.GuardCheckResult) int {
+	switch r.Status {
+	case "breached":
+		return 2
+	case "warning":
+		return 1
+	}
+	return 0
+}
+
+func (g *Guard) check(projectID, clientApp string, projectLimits, quotaLimits config.GuardConfig) domain.GuardCheckResult {
+	loc, err := time.LoadLocation(projectLimits.Timezone)
 	if err != nil {
-		if limits.Timezone != "" {
-			g.logger.Warn("invalid guard timezone, using UTC", "timezone", limits.Timezone, "error", err)
+		if projectLimits.Timezone != "" {
+			g.logger.Warn("invalid guard timezone, using UTC", "timezone", projectLimits.Timezone, "error", err)
 		}
 		loc = time.UTC
 	}
@@ -80,7 +109,58 @@ func (g *Guard) Check(projectID string) domain.GuardCheckResult {
 		g.logger.Error("guard check failed, allowing request (fail-open)", "error", err)
 		return domain.GuardCheckResult{Allowed: true, Status: "ok"}
 	}
+	result := evaluate(summary, projectLimits)
 
+	if clientApp != "" && hasBudget(quotaLimits) {
+		// The quota needs the key's own spend, and it inherits the project's
+		// warning threshold, timezone and breach action, none of which a key
+		// carries. A tie keeps the quota: it is the more specific constraint.
+		quotaLimits.WarningThresholdPct = projectLimits.WarningThresholdPct
+		quotaLimits.ActionOnBreach = projectLimits.ActionOnBreach
+		keySummary, err := g.db.GetClientCostSummaryInLocation(projectID, clientApp, loc)
+		if err != nil {
+			g.logger.Error("key quota check failed, allowing request (fail-open)", "error", err)
+		} else if keyResult := evaluate(keySummary, quotaLimits); severity(keyResult) >= severity(result) {
+			result = keyResult
+		}
+	}
+
+	// Alert only on state transition (ok -> warning/breached, or warning -> breached)
+	if result.Status != "ok" {
+		alertKey := result.Status + ":" + result.Message
+		g.alertMu.Lock()
+		if alertKey != g.lastAlertKey {
+			g.lastAlertKey = alertKey
+			g.alertMu.Unlock()
+			if err := g.db.InsertGuardEvent(db.GuardEvent{
+				Timestamp:      time.Now().UTC().Format(time.RFC3339Nano),
+				Status:         result.Status,
+				Message:        result.Message,
+				MessageCode:    result.ReasonCode,
+				MessageParams:  marshalParams(result.ReasonParams),
+				Action:         result.ActionOnBreach,
+				DailyCostUSD:   result.CurrentDailyCost,
+				MonthlyCostUSD: result.CurrentMonthlyCost,
+			}); err != nil {
+				g.logger.Warn("could not persist guard transition", "error", err)
+			}
+			g.enqueueAlerts(result)
+		} else {
+			g.alertMu.Unlock()
+		}
+	} else {
+		g.alertMu.Lock()
+		g.lastAlertKey = ""
+		g.alertMu.Unlock()
+	}
+
+	return result
+}
+
+// evaluate compares one measured window against one set of limits. It touches
+// no database and sends nothing: callers decide which windows to measure and
+// which result to keep.
+func evaluate(summary db.CostSummary, limits config.GuardConfig) domain.GuardCheckResult {
 	result := domain.GuardCheckResult{
 		Allowed:             true,
 		Status:              "ok",
@@ -164,35 +244,6 @@ func (g *Guard) Check(projectID string) domain.GuardCheckResult {
 		result.Allowed = result.ActionOnBreach != "block"
 	}
 
-	// Alert only on state transition (ok -> warning/breached, or warning -> breached)
-	if result.Status != "ok" {
-		alertKey := result.Status + ":" + result.Message
-		g.alertMu.Lock()
-		if alertKey != g.lastAlertKey {
-			g.lastAlertKey = alertKey
-			g.alertMu.Unlock()
-			if err := g.db.InsertGuardEvent(db.GuardEvent{
-				Timestamp:      time.Now().UTC().Format(time.RFC3339Nano),
-				Status:         result.Status,
-				Message:        result.Message,
-				MessageCode:    result.ReasonCode,
-				MessageParams:  marshalParams(result.ReasonParams),
-				Action:         result.ActionOnBreach,
-				DailyCostUSD:   result.CurrentDailyCost,
-				MonthlyCostUSD: result.CurrentMonthlyCost,
-			}); err != nil {
-				g.logger.Warn("could not persist guard transition", "error", err)
-			}
-			go g.dispatchAlerts(result)
-		} else {
-			g.alertMu.Unlock()
-		}
-	} else {
-		g.alertMu.Lock()
-		g.lastAlertKey = ""
-		g.alertMu.Unlock()
-	}
-
 	return result
 }
 
@@ -225,23 +276,6 @@ func marshalParams(params map[string]string) string {
 	return string(encoded)
 }
 
-func (g *Guard) dispatchAlerts(result domain.GuardCheckResult) {
-	text := formatAlertText(result)
-
-	if g.alerts.SlackURL != "" {
-		g.sendWebhook(g.alerts.SlackURL, text)
-	}
-	if g.alerts.DiscordURL != "" {
-		g.sendWebhook(g.alerts.DiscordURL, text)
-	}
-	if g.alerts.Telegram.BotToken != "" && g.alerts.Telegram.ChatID != "" {
-		g.sendTelegram(g.alerts.Telegram, text)
-	}
-	if g.alerts.Email.SMTPHost != "" {
-		g.sendEmail(g.alerts.Email, text)
-	}
-}
-
 func formatAlertText(r domain.GuardCheckResult) string {
 	icon := "⚠️"
 	if r.Status == "breached" {
@@ -249,34 +283,4 @@ func formatAlertText(r domain.GuardCheckResult) string {
 	}
 	return fmt.Sprintf("%s odotoken alert: %s\nDaily: $%.4f | Monthly: $%.4f | DailyTokens: %d | MonthlyTokens: %d",
 		icon, r.Message, r.CurrentDailyCost, r.CurrentMonthlyCost, r.CurrentDailyTokens, r.CurrentMonthTokens)
-}
-
-func (g *Guard) sendWebhook(url, text string) {
-	resp, err := g.httpClient.Post(url, "application/json", strings.NewReader(fmt.Sprintf(`{"text":%q}`, text)))
-	if err != nil {
-		g.logger.Warn("webhook alert failed", "url", url, "error", err)
-		return
-	}
-	resp.Body.Close()
-}
-
-func (g *Guard) sendTelegram(cfg config.TelegramConfig, text string) {
-	apiURL := fmt.Sprintf("https://api.telegram.org/bot%s/sendMessage", cfg.BotToken)
-	body := fmt.Sprintf(`{"chat_id":%q,"text":%q}`, cfg.ChatID, text)
-	resp, err := g.httpClient.Post(apiURL, "application/json", strings.NewReader(body))
-	if err != nil {
-		g.logger.Warn("telegram alert failed", "error", err)
-		return
-	}
-	resp.Body.Close()
-}
-
-func (g *Guard) sendEmail(cfg config.EmailConfig, text string) {
-	addr := net.JoinHostPort(cfg.SMTPHost, strconv.Itoa(cfg.SMTPPort))
-	auth := smtp.PlainAuth("", cfg.Username, cfg.Password, cfg.SMTPHost)
-	msg := fmt.Sprintf("From: %s\r\nTo: %s\r\nSubject: odotoken alert\r\n\r\n%s", cfg.FromAddr, cfg.ToAddr, text)
-	err := smtp.SendMail(addr, auth, cfg.FromAddr, []string{cfg.ToAddr}, []byte(msg))
-	if err != nil {
-		g.logger.Warn("email alert failed", "error", err)
-	}
 }

@@ -9,24 +9,15 @@ import (
 func DefaultConfig() Config {
 	return Config{
 		TokenCounter: TokenCounterConfig{
-			Enabled: true,
-			Heuristic: HeuristicConfig{
-				CharsPerToken: 4.0,
-				WordsPerToken: 0.75,
-			},
+			Enabled:   true,
+			Heuristic: HeuristicConfig{CharsPerToken: 4.0, WordsPerToken: 0.75},
 			Providers: make(map[string]ProviderConfig),
 		},
-		Sessions: SessionsConfig{
-			Enabled: true,
-			Paths:   make(map[string]string),
-		},
-		Guard: GuardConfig{
-			WarningThresholdPct: 80.0,
-			ActionOnBreach:      "block",
-		},
-		Server: ServerConfig{
-			BindHost: "127.0.0.1",
-		},
+		Sessions:        SessionsConfig{Enabled: true, Paths: make(map[string]string)},
+		Guard:           GuardConfig{WarningThresholdPct: 80.0, ActionOnBreach: "block"},
+		Server:          ServerConfig{BindHost: "127.0.0.1"},
+		ScheduledImport: ScheduledImportConfig{Interval: "24h"},
+		Alerts:          AlertsConfig{Retry: AlertRetry{MaxAttempts: 5, BaseDelaySeconds: 30, MaxDelaySeconds: 3600}},
 	}
 }
 
@@ -36,7 +27,6 @@ func Load(path string) (Config, error) {
 	if path == "" {
 		path = "config.json"
 	}
-
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -44,14 +34,21 @@ func Load(path string) (Config, error) {
 		}
 		return cfg, err
 	}
-
 	if err := json.Unmarshal(data, &cfg); err != nil {
 		return cfg, err
 	}
-
 	applyEnvOverrides(&cfg)
 	if cfg.Server.BindHost == "" {
 		cfg.Server.BindHost = "127.0.0.1"
+	}
+	if cfg.Alerts.Retry.MaxAttempts <= 0 {
+		cfg.Alerts.Retry.MaxAttempts = 5
+	}
+	if cfg.Alerts.Retry.BaseDelaySeconds <= 0 {
+		cfg.Alerts.Retry.BaseDelaySeconds = 30
+	}
+	if cfg.Alerts.Retry.MaxDelaySeconds <= 0 {
+		cfg.Alerts.Retry.MaxDelaySeconds = 3600
 	}
 	return cfg, nil
 }

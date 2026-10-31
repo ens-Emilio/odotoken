@@ -17,6 +17,7 @@ import (
 
 	"golang.org/x/time/rate"
 
+	"github.com/ens-Emilio/odotoken/internal/auth"
 	"github.com/ens-Emilio/odotoken/internal/config"
 	"github.com/ens-Emilio/odotoken/internal/db"
 	"github.com/ens-Emilio/odotoken/internal/domain"
@@ -26,63 +27,130 @@ import (
 	"github.com/google/uuid"
 )
 
-// Proxy is a transparent reverse proxy that meters token usage.
 type Proxy struct {
-	db        *db.Database
-	pricing   *pricing.Calculator
-	guard     *guard.Guard
-	limiter   *rate.Limiter
-	cfg       config.Config
-	upstreams map[string]*url.URL
-	mu        sync.RWMutex
-	logger    *slog.Logger
+	db              *db.Database
+	pricing         *pricing.Calculator
+	guard           *guard.Guard
+	keys            *auth.Store
+	limiter         *rate.Limiter
+	projectLimiters map[string]*rate.Limiter
+	clientLimiters  map[string]*rate.Limiter
+	cfg             config.Config
+	upstreams       map[string]*url.URL
+	fallbacks       map[string][]fallbackTarget
+	fallbackStatus  map[string]map[int]bool
+	mu              sync.RWMutex
+	logger          *slog.Logger
 }
 
 func New(database *db.Database, calc *pricing.Calculator, cfg config.Config, logger *slog.Logger) *Proxy {
 	p := &Proxy{
-		db:      database,
-		pricing: calc,
-		cfg:     cfg,
+		db:              database,
+		pricing:         calc,
+		cfg:             cfg,
+		projectLimiters: make(map[string]*rate.Limiter),
+		clientLimiters:  make(map[string]*rate.Limiter),
 		upstreams: map[string]*url.URL{
 			"anthropic": mustParseURL("https://api.anthropic.com"),
 			"openai":    mustParseURL("https://api.openai.com"),
 			"gemini":    mustParseURL("https://generativelanguage.googleapis.com"),
 			"ollama":    mustParseURL("http://localhost:11434"),
 		},
-		logger: logger,
+		fallbacks:      make(map[string][]fallbackTarget),
+		fallbackStatus: make(map[string]map[int]bool),
+		logger:         logger,
 	}
 
-	// Load custom providers from config
 	for name, providerCfg := range cfg.Providers {
 		if providerCfg.UpstreamURL != "" {
 			p.upstreams[name] = mustParseURL(providerCfg.UpstreamURL)
 		}
 	}
-
-	if rl := cfg.Limits.RateLimit; rl.Enabled && rl.RPS > 0 {
-		burst := rl.BurstSize
-		if burst <= 0 {
-			burst = int(rl.RPS)
+	// Fallbacks are named providers, resolved after every upstream is known so
+	// a fallback may point at a provider declared later in the file.
+	for name, providerCfg := range cfg.Providers {
+		for _, target := range providerCfg.Fallbacks {
+			upstream, ok := p.upstreams[target]
+			if !ok || target == name {
+				logger.Warn("ignoring unusable provider fallback", "provider", name, "fallback", target)
+				continue
+			}
+			p.fallbacks[name] = append(p.fallbacks[name], fallbackTarget{provider: target, url: upstream})
 		}
-		p.limiter = rate.NewLimiter(rate.Limit(rl.RPS), burst)
+		if len(p.fallbacks[name]) > 0 {
+			p.fallbackStatus[name] = fallbackStatusSet(providerCfg.FallbackOnStatus)
+		}
 	}
 
+	if rl := cfg.Limits.RateLimit; rl.Enabled && rl.RPS > 0 {
+		p.limiter = newLimiter(rl.RPS, rl.BurstSize)
+		for key, override := range rl.Projects {
+			if override.RPS > 0 {
+				p.projectLimiters[key] = newLimiter(override.RPS, override.BurstSize)
+			}
+		}
+		for key, override := range rl.Clients {
+			if override.RPS > 0 {
+				p.clientLimiters[key] = newLimiter(override.RPS, override.BurstSize)
+			}
+		}
+	}
 	return p
 }
+
+func newLimiter(rps float64, burst int) *rate.Limiter {
+	if burst <= 0 {
+		burst = int(rps)
+	}
+	if burst <= 0 {
+		burst = 1
+	}
+	return rate.NewLimiter(rate.Limit(rps), burst)
+}
+
+// fallbackTarget is another configured provider the proxy may retry against.
+type fallbackTarget struct {
+	provider string
+	url      *url.URL
+}
+
+// fallbackStatusSet decides which upstream statuses trigger a retry. The
+// default covers the transient classes operators care about: rate limits and
+// upstream outages.
+func fallbackStatusSet(statuses []int) map[int]bool {
+	if len(statuses) == 0 {
+		statuses = []int{
+			http.StatusTooManyRequests,
+			http.StatusInternalServerError,
+			http.StatusBadGateway,
+			http.StatusServiceUnavailable,
+			http.StatusGatewayTimeout,
+		}
+	}
+	set := make(map[int]bool, len(statuses))
+	for _, code := range statuses {
+		set[code] = true
+	}
+	return set
+}
+
 func (p *Proxy) Handler() http.Handler {
 	rp := &httputil.ReverseProxy{
 		Director:       p.director,
 		ModifyResponse: p.modifyResponse,
 		ErrorHandler:   p.errorHandler,
-		Transport: &http.Transport{
-			Proxy:                 http.ProxyFromEnvironment,
-			MaxIdleConns:          64,
-			MaxIdleConnsPerHost:   32,
-			IdleConnTimeout:       90 * time.Second,
-			TLSHandshakeTimeout:   15 * time.Second,
-			ResponseHeaderTimeout: 120 * time.Second,
-			ExpectContinueTimeout: time.Second,
-			ForceAttemptHTTP2:     true,
+		Transport: &fallbackTransport{
+			base: &http.Transport{
+				Proxy:                 http.ProxyFromEnvironment,
+				MaxIdleConns:          64,
+				MaxIdleConnsPerHost:   32,
+				IdleConnTimeout:       90 * time.Second,
+				TLSHandshakeTimeout:   15 * time.Second,
+				ResponseHeaderTimeout: 120 * time.Second,
+				ExpectContinueTimeout: time.Second,
+				ForceAttemptHTTP2:     true,
+			},
+			proxy: p,
 		},
 	}
 	rp.FlushInterval = -1
@@ -97,10 +165,18 @@ func (p *Proxy) Handler() http.Handler {
 	// Intercept request body to extract model before proxying
 	handler = p.activeRunMiddleware(handler)
 	handler = p.extractModelMiddleware(handler)
+	if p.keys != nil {
+		// A client key only ever adds attribution; a request carrying an
+		// upstream provider token keeps flowing untouched.
+		handler = auth.Attribute(p.keys, handler)
+	}
 	return handler
 }
 
 func (p *Proxy) director(req *http.Request) {
+	// The provider prefix is stripped below; fallback retries need the path the
+	// client actually asked for, so remember it before any rewriting.
+	originalPath := req.URL.Path
 	// Check for explicit provider header first
 	explicitProvider := req.Header.Get("X-Odo-Provider")
 
@@ -174,8 +250,10 @@ func (p *Proxy) director(req *http.Request) {
 	req.URL.Host = upstream.Host
 	req.Host = upstream.Host
 
-	// Store the actual provider in context for modifyResponse
+	// Store the actual provider in context for modifyResponse, plus the client
+	// path so a fallback retry can rebuild the URL for another provider.
 	ctx := context.WithValue(req.Context(), providerContextKey, provider)
+	ctx = context.WithValue(ctx, originalPathContextKey, originalPath)
 	*req = *req.WithContext(ctx)
 
 	if h := req.Header.Get("Te"); h == "trailers" {
@@ -186,9 +264,10 @@ func (p *Proxy) director(req *http.Request) {
 type contextKey string
 
 const (
-	modelContextKey    contextKey = "request_model"
-	providerContextKey contextKey = "request_provider"
-	runContextKey      contextKey = "request_run"
+	modelContextKey        contextKey = "request_model"
+	providerContextKey     contextKey = "request_provider"
+	originalPathContextKey contextKey = "request_original_path"
+	runContextKey          contextKey = "request_run"
 )
 
 type requestUsageContext struct {
@@ -228,6 +307,10 @@ func (p *Proxy) extractModelMiddleware(next http.Handler) http.Handler {
 			return
 		}
 		r.Body = io.NopCloser(bytes.NewReader(bodyBytes))
+		r.ContentLength = int64(len(bodyBytes))
+		r.GetBody = func() (io.ReadCloser, error) {
+			return io.NopCloser(bytes.NewReader(bodyBytes)), nil
+		}
 
 		// Try to extract model and prompt size from JSON body.
 		var reqBody map[string]interface{}
@@ -322,10 +405,22 @@ func (p *Proxy) modifyResponse(resp *http.Response) error {
 		if requestUsage, ok := resp.Request.Context().Value(requestUsageContextKey).(requestUsageContext); ok {
 			countingBody.onRead = func() { _ = p.db.TouchActiveRun(requestUsage.runID) }
 		}
+		// A budget breach mid-stream ends the response with one final SSE
+		// error frame instead of a truncated connection: the client sees a
+		// parseable event and the usage recorded so far still lands.
+		countingBody.budgetExceeded = func() string {
+			if p.guard == nil {
+				return ""
+			}
+			result := p.guard.Check(projectID)
+			if result.Allowed || result.ActionOnBreach != "block" {
+				return ""
+			}
+			return result.Message
+		}
 		resp.Body = countingBody
 		resp.ContentLength = -1
 		resp.Header.Del("Content-Length")
-
 		go func() {
 			<-countingBody.done
 			usage := parser.SanitizeUsage(acc.Finalize())
@@ -351,6 +446,10 @@ func (p *Proxy) modifyResponse(resp *http.Response) error {
 				if resp.StatusCode >= http.StatusBadRequest {
 					status = "failed"
 					errorText = fmt.Sprintf("upstream HTTP %d", resp.StatusCode)
+				}
+				if countingBody.cutShort.Load() {
+					status = "budget_exceeded"
+					errorText = "stream stopped: budget limit reached mid-response"
 				}
 				_ = p.db.FinishActiveRun(requestUsage.runID, status, errorText,
 					usage.PromptTokens, usage.CompletionTokens, cost)
@@ -426,12 +525,17 @@ func (p *Proxy) modifyResponse(resp *http.Response) error {
 
 type countingReadCloser struct {
 	io.ReadCloser
-	acc       *parser.StreamUsageAccumulator
-	bytes     int64
-	once      sync.Once
-	done      chan struct{}
-	onRead    func()
-	lastTouch atomic.Int64
+	acc            *parser.StreamUsageAccumulator
+	bytes          int64
+	once           sync.Once
+	done           chan struct{}
+	onRead         func()
+	lastTouch      atomic.Int64
+	budgetExceeded func() string
+	lastBudget     atomic.Int64
+	pending        []byte
+	stopped        bool
+	cutShort       atomic.Bool
 }
 
 func newCountingReadCloser(body io.ReadCloser, acc *parser.StreamUsageAccumulator) *countingReadCloser {
@@ -439,6 +543,24 @@ func newCountingReadCloser(body io.ReadCloser, acc *parser.StreamUsageAccumulato
 }
 
 func (c *countingReadCloser) Read(p []byte) (int, error) {
+	if len(c.pending) > 0 {
+		n := copy(p, c.pending)
+		c.pending = c.pending[n:]
+		return n, nil
+	}
+	if c.stopped {
+		c.signalDone()
+		return 0, io.EOF
+	}
+	if msg := c.overBudget(); msg != "" {
+		// One valid SSE frame, then EOF. Aborting the connection instead would
+		// leave clients with an unparseable half-event.
+		c.stopped = true
+		c.cutShort.Store(true)
+		c.pending = []byte(fmt.Sprintf("data: {\"error\":{\"message\":%q,\"type\":\"budget_exceeded\"}}\n\n", msg))
+		_ = c.ReadCloser.Close()
+		return c.Read(p)
+	}
 	n, err := c.ReadCloser.Read(p)
 	if n > 0 {
 		atomic.AddInt64(&c.bytes, int64(n))
@@ -455,6 +577,20 @@ func (c *countingReadCloser) Read(p []byte) (int, error) {
 		c.signalDone()
 	}
 	return n, err
+}
+
+// overBudget re-checks the budget at most every two seconds. Checking per
+// chunk would add a SQLite query to every SSE frame.
+func (c *countingReadCloser) overBudget() string {
+	if c.budgetExceeded == nil {
+		return ""
+	}
+	now := time.Now().UnixMilli()
+	previous := c.lastBudget.Load()
+	if now-previous < 2_000 || !c.lastBudget.CompareAndSwap(previous, now) {
+		return ""
+	}
+	return c.budgetExceeded()
 }
 
 func (c *countingReadCloser) Close() error {
@@ -503,6 +639,12 @@ func (p *Proxy) recordEventNow(resp *http.Response, provider, clientApp, project
 		Metadata:         string(metadataJSON),
 		Source:           "proxy",
 	}
+	// session_id/run_id let an operator join a proxy event to the active-run
+	// row and to the client session that caused it.
+	if requestUsage, ok := resp.Request.Context().Value(requestUsageContextKey).(requestUsageContext); ok {
+		event.SessionID = requestUsage.sessionID
+		event.RunID = requestUsage.runID
+	}
 	go func() {
 		if _, insertErr := p.db.InsertEvent(event); insertErr != nil {
 			p.logger.Error("failed to insert token event", "error", insertErr)
@@ -520,7 +662,27 @@ func (p *Proxy) errorHandler(w http.ResponseWriter, r *http.Request, err error) 
 
 func (p *Proxy) rateLimitMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if !p.limiter.Allow() {
+		project := r.Header.Get("X-Odo-Project")
+		if project == "" {
+			project = "default"
+		}
+		client := r.Header.Get("X-Odo-Client")
+		if client == "" {
+			client = parser.IdentifyClientApp(headerMap(r.Header))
+		}
+		p.mu.RLock()
+		projectLimiter := p.projectLimiters[project]
+		clientLimiter := p.clientLimiters[client]
+		p.mu.RUnlock()
+
+		allowed := p.limiter.Allow()
+		if projectLimiter != nil && !projectLimiter.Allow() {
+			allowed = false
+		}
+		if clientLimiter != nil && !clientLimiter.Allow() {
+			allowed = false
+		}
+		if !allowed {
 			http.Error(w, "Rate limit exceeded", http.StatusTooManyRequests)
 			return
 		}
@@ -533,14 +695,26 @@ func (p *Proxy) SetGuard(g *guard.Guard) {
 	p.guard = g
 }
 
-// guardMiddleware checks budget limits before forwarding requests.
+// SetKeyStore lets the proxy resolve client API keys for attribution and
+// per-key quotas. Without it the proxy meters exactly as before.
+func (p *Proxy) SetKeyStore(store *auth.Store) {
+	p.keys = store
+}
+
+// guardMiddleware checks budget limits before forwarding requests. A request
+// that authenticated with a client key also has to satisfy that key's quota.
 func (p *Proxy) guardMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		projectID := r.Header.Get("X-Odo-Project")
 		if projectID == "" {
 			projectID = "default"
 		}
-		result := p.guard.Check(projectID)
+		var result domain.GuardCheckResult
+		if id, ok := auth.FromRequest(r); ok && id.Key != nil {
+			result = p.guard.CheckWithQuota(projectID, id.Client, id.Key.GuardConfig())
+		} else {
+			result = p.guard.Check(projectID)
+		}
 		if !result.Allowed && result.ActionOnBreach == "block" {
 			http.Error(w, result.Message, http.StatusTooManyRequests)
 			return

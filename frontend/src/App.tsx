@@ -20,7 +20,7 @@ import { Select } from './ui/Select'
 import { useFilterOptions, useGuardStatus } from './api'
 import { guardStatusReason } from './guard-reason'
 import type { ViewId } from './views'
-import { OverviewView, ModelsView, ClientsView, EventsView, ThroughputView, GuardView, SettingsView, ImportView } from './views'
+import { OverviewView, ModelsView, ClientsView, EventsView, ThroughputView, GuardView, SettingsView, ImportView, SessionsView, CacheView, SimulateView, PricesView, AnomaliesView, ClientKeysView } from './views'
 
 function View({ id, timeFilter, project, source, tag }: { id: ViewId; timeFilter: string; project: string; source: string; tag: string }) {
   switch (id) {
@@ -29,6 +29,12 @@ function View({ id, timeFilter, project, source, tag }: { id: ViewId; timeFilter
     case 'clients': return <ClientsView timeFilter={timeFilter} project={project} source={source} tag={tag} />
     case 'events': return <EventsView timeFilter={timeFilter} project={project} source={source} tag={tag} />
     case 'throughput': return <ThroughputView timeFilter={timeFilter} project={project} source={source} tag={tag} />
+    case 'sessions': return <SessionsView timeFilter={timeFilter} project={project} source={source} tag={tag} />
+    case 'cache': return <CacheView timeFilter={timeFilter} project={project} source={source} tag={tag} />
+    case 'anomalies': return <AnomaliesView project={project} source={source} tag={tag} />
+    case 'simulate': return <SimulateView />
+    case 'prices': return <PricesView />
+    case 'clientKeys': return <ClientKeysView />
     case 'guard': return <GuardView />
     case 'settings': return <SettingsView />
     case 'import': return <ImportView />
@@ -96,7 +102,8 @@ export default function App() {
   const viewTitle: Record<ViewId, string> = {
     overview: t('nav.overview'), models: t('nav.models'), clients: t('nav.clients'),
     events: t('nav.events'), throughput: t('nav.throughput'), guard: t('nav.guard'),
-    settings: t('nav.settings'), import: t('nav.import'),
+    settings: t('nav.settings'), import: t('nav.import'), sessions: t('nav.sessions'),
+    cache: t('nav.cache'), simulate: t('nav.simulate'), prices: t('nav.prices'), anomalies: t('nav.anomalies'), clientKeys: t('nav.clientKeys'),
   }
 
   return (

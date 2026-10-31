@@ -4,6 +4,25 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-10-30
+### Added
+- Prometheus `GET /metrics`, `odotoken doctor`, and read-only `odotoken mcp` stdio analytics.
+- Per-project/client rate limits, provider fallback chains for configured 429/5xx statuses, configurable token-event retention with opt-in VACUUM, and scheduled imports.
+- Durable SQLite alert outbox with exponential retry/backoff and session/run identifiers on proxy events.
+- OTLP/HTTP metrics export (`otel.enabled`, `otel.endpoint`, `otel.interval_seconds`) started with the daemon and reported by `odotoken doctor`.
+- `odotoken export` writes the bounded event query as CSV or JSON with time, project, source, and tag filters; `--out FILE --json` prints a machine-readable row summary.
+- `odotoken prices list|set|delete` exposes the model-price override store and marks each row `override` or `builtin`; deleting a builtin rate is refused.
+### Fixed
+- Streaming responses stop cleanly with a valid SSE budget error when a project budget is exceeded mid-response.
+- Per-key quotas no longer hide the project budget: the project limits are
+  measured over the whole project and the key quota over that key's own spend,
+  so a key under its quota is still blocked when the project is over budget,
+  and a key without a quota can no longer spend past the project limits.
+
+### Removed
+- `cache.semantic` — the key was parsed but nothing ever read it, so it promised a
+  feature that did not exist. `config.json` files still carrying it keep loading.
+
 ## [0.7.0] - 2026-10-28
 ### Added
 - Dashboard localization in 20 languages, including right-to-left layout for Arabic and Persian

@@ -12,10 +12,12 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 
 	"github.com/ens-Emilio/odotoken/internal/api"
+	"github.com/ens-Emilio/odotoken/internal/auth"
 	"github.com/ens-Emilio/odotoken/internal/config"
 	"github.com/ens-Emilio/odotoken/internal/db"
 	"github.com/ens-Emilio/odotoken/internal/guard"
 	"github.com/ens-Emilio/odotoken/internal/importers"
+	"github.com/ens-Emilio/odotoken/internal/otel"
 	"github.com/ens-Emilio/odotoken/internal/pricing"
 	"github.com/ens-Emilio/odotoken/internal/proxy"
 )
@@ -26,6 +28,7 @@ type Server struct {
 	Config  config.Config
 	Pricing *pricing.Calculator
 	Guard   *guard.Guard
+	Otel    *otel.Exporter
 	Proxy   *proxy.Proxy
 	Router  chi.Router
 	Logger  *slog.Logger
@@ -41,8 +44,13 @@ func New(database *db.Database, cfg config.Config, logger *slog.Logger) *Server 
 func NewWithConfigPath(database *db.Database, cfg config.Config, logger *slog.Logger, configPath string) *Server {
 	calc := pricing.NewCalculator("prices.json")
 	g := guard.New(database, cfg.Guard, cfg.Alerts, logger)
+	// Nil when otel is disabled or has no endpoint, so callers can skip the
+	// worker instead of polling for nothing.
+	exporter := otel.New(database, cfg.Otel, logger)
+	keys := auth.NewStore(cfg.Server.ClientKeys, configPath, logger)
 	p := proxy.New(database, calc, cfg, logger)
 	p.SetGuard(g)
+	p.SetKeyStore(keys)
 
 	r := chi.NewRouter()
 	r.Use(middleware.Recoverer)
@@ -88,8 +96,21 @@ func NewWithConfigPath(database *db.Database, cfg config.Config, logger *slog.Lo
 
 	// API routes
 	r.Mount("/v1", authed(api.Router(cfg, calc)))
-	r.Mount("/api", authed(api.DashboardRouter(database, g.Check, g.Limits, g.UpdateLimits, configPath,
-		importers.NewEngine(importers.Paths(cfg.Sessions.Paths), calc, database))))
+	dashboard := api.DashboardRouter(database, g.Check, g.Limits, g.UpdateLimits, configPath,
+		importers.NewEngine(importers.Paths(cfg.Sessions.Paths), calc, database))
+	api.RegisterClientKeyRoutes(dashboard, keys)
+	api.RegisterAnalyticsRoutes(dashboard, database, calc, "prices.json")
+	r.Mount("/metrics", authed(api.MetricsRouter(database)))
+	r.Mount("/api", authed(dashboard))
+
+	// Liveness of odotoken itself. Deliberately unauthenticated and outside the
+	// proxy: a probe that needs a secret, spends the rate-limit burst or records
+	// token usage starts failing exactly when the operator needs it most.
+	r.Get("/health", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"status":"ok"}` + "\n"))
+	})
 
 	// Favicon — serve from disk
 	r.Get("/favicon.ico", func(w http.ResponseWriter, r *http.Request) {
@@ -165,6 +186,7 @@ func NewWithConfigPath(database *db.Database, cfg config.Config, logger *slog.Lo
 		Config:  cfg,
 		Pricing: calc,
 		Guard:   g,
+		Otel:    exporter,
 		Proxy:   p,
 		Router:  r,
 		Logger:  logger,

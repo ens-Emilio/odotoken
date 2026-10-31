@@ -152,3 +152,58 @@ export interface LiveSession {
   last_updated: string
   elapsed_ms: number
 }
+
+export interface SessionCost {
+  session_id: string
+  session_file?: string
+  client_app: string
+  project_id: string
+  models: string
+  requests: number
+  prompt_tokens: number
+  completion_tokens: number
+  total_tokens: number
+  cache_read_tokens: number
+  cache_write_tokens: number
+  cost_usd: number
+  started_at: string
+  ended_at: string
+}
+
+export interface CacheSavings {
+  requests: number
+  cache_read_tokens: number
+  cache_write_tokens: number
+  actual_cost_usd: number
+  read_saved_usd: number
+  write_premium_usd: number
+  net_saved_usd: number
+  uncached_cost_usd: number
+  discount_pct: number
+  unpriced_models: number
+  by_model: Array<{ model: string; provider: string; requests: number; cache_read_tokens: number; cache_write_tokens: number; net_saved_usd: number; discount_pct: number; priced: boolean }>
+}
+
+export interface SimulationRow {
+  model: string
+  input_rate_per_1m: number
+  output_rate_per_1m: number
+  cache_read_rate_per_1m: number
+  cache_write_rate_per_1m: number
+  per_request_usd: number
+  total_usd: number
+  delta_vs_baseline_usd: number
+  priced: boolean
+}
+
+export interface PriceRow {
+  model: string
+  input: number
+  output: number
+  cache_read: number
+  cache_write: number
+  explicit: boolean
+}
+
+export interface AnomalyAttribution { key: string; cost_usd: number; baseline_usd: number; delta_usd: number; share_pct: number }
+export interface AttributedAnomaly { day: string; cost_usd: number; threshold: number; z_score: number; by_model: AnomalyAttribution[]; by_project: AnomalyAttribution[] }

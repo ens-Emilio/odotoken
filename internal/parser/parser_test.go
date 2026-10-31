@@ -7,6 +7,30 @@ import (
 	"github.com/ens-Emilio/odotoken/internal/domain"
 )
 
+// A resolved client key must win: its X-Odo-Client header is the attribution
+// the quota is measured against, so a User-Agent must not override it.
+func TestIdentifyClientAppPrefersOdoClient(t *testing.T) {
+	headers := map[string]string{
+		"x-odo-client": "key-client",
+		"x-client-app": "custom-client",
+		"user-agent":   "claude-cli/1.0",
+	}
+	if got := IdentifyClientApp(headers); got != "key-client" {
+		t.Fatalf("client = %q, want the key's client", got)
+	}
+}
+
+// Without a key, the pre-existing precedence stays: x-client-app, then UA.
+func TestIdentifyClientAppKeepsExistingPrecedence(t *testing.T) {
+	headers := map[string]string{"x-client-app": "custom-client", "user-agent": "claude-cli/1.0"}
+	if got := IdentifyClientApp(headers); got != "custom-client" {
+		t.Fatalf("client = %q, want x-client-app", got)
+	}
+	if got := IdentifyClientApp(map[string]string{"user-agent": "claude-cli/1.0"}); got != "claude-cli" {
+		t.Fatalf("client = %q, want the user-agent detection", got)
+	}
+}
+
 // TestWriteMeasuresStreamDuration feeds an SSE stream through Write one chunk at
 // a time with real delays and asserts the measured span matches the wall clock.
 func TestWriteMeasuresStreamDuration(t *testing.T) {

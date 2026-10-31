@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 )
 
 // ModelRates holds per-million-token rates for a model.
@@ -30,8 +31,10 @@ var defaultPrices = map[string]ModelRates{
 	"default":           {Input: 0.0, Output: 0.0, CacheRead: 0.0, CacheWrite: 0.0},
 }
 
-// Calculator computes token costs.
+// Calculator computes token costs. Prices can be edited through the dashboard,
+// so readers take a snapshot while the proxy keeps serving requests.
 type Calculator struct {
+	mu     sync.RWMutex
 	prices map[string]ModelRates
 }
 
@@ -79,28 +82,72 @@ func NewCalculator(priceFile string) *Calculator {
 // HasExplicitPrice reports whether a model has a real catalog price. Falling
 // back to default ($0) is not a valid cost signal.
 func (c *Calculator) HasExplicitPrice(model string) bool {
-	if _, ok := c.prices[model]; ok {
-		return true
-	}
-	for prefix := range c.prices {
-		if prefix != "default" && strings.HasPrefix(model, prefix) {
-			return true
-		}
-	}
-	return false
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	_, ok := c.matchRatesLocked(model)
+	return ok
 }
 
 // GetModelRates finds the best matching rates for a model name.
 func (c *Calculator) GetModelRates(model string) ModelRates {
-	if rates, ok := c.prices[model]; ok {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.getRatesLocked(model)
+}
+
+func (c *Calculator) getRatesLocked(model string) ModelRates {
+	if rates, ok := c.matchRatesLocked(model); ok {
 		return rates
 	}
+	return c.prices["default"]
+}
+
+// matchRatesLocked returns the exact row or the longest matching prefix. The
+// length comparison makes overlapping catalog entries deterministic: a suffix
+// the catalog does not know can no longer cost whatever entry Go visited first.
+func (c *Calculator) matchRatesLocked(model string) (ModelRates, bool) {
+	if rates, ok := c.prices[model]; ok {
+		return rates, true
+	}
+	var best ModelRates
+	bestLen := 0
 	for prefix, rates := range c.prices {
-		if prefix != "default" && strings.HasPrefix(model, prefix) {
-			return rates
+		if prefix != "default" && len(prefix) > bestLen && strings.HasPrefix(model, prefix) {
+			best = rates
+			bestLen = len(prefix)
 		}
 	}
-	return c.prices["default"]
+	return best, bestLen > 0
+}
+
+// Prices returns a copy of the current catalog for API and CLI consumers.
+func (c *Calculator) Prices() map[string]ModelRates {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	out := make(map[string]ModelRates, len(c.prices))
+	for model, rates := range c.prices {
+		out[model] = rates
+	}
+	return out
+}
+
+// ReplacePrices validates and replaces the explicit catalog. The built-in
+// defaults remain available for models omitted from an override file.
+func (c *Calculator) ReplacePrices(prices map[string]ModelRates) error {
+	if err := ValidatePrices(prices); err != nil {
+		return err
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	merged := make(map[string]ModelRates, len(defaultPrices)+len(prices))
+	for model, rates := range defaultPrices {
+		merged[model] = rates
+	}
+	for model, rates := range prices {
+		merged[model] = rates
+	}
+	c.prices = merged
+	return nil
 }
 
 // CalculateCost computes USD cost for token usage (rates are per 1M tokens).

@@ -2,14 +2,21 @@
   "server": {
     "bind_host": "127.0.0.1",
     "api_key": "change-me-or-use-ODO_API_KEY",
+    "client_keys": {
+      "odt_change_me_example_key": { "client": "example", "project": "default" }
+    },
     "cors_allowlist": ["http://localhost:5173"]
   },
   "providers": {
-    "openai": { "upstream_url": "https://api.openai.com" },
+    "openai": {
+      "upstream_url": "https://api.openai.com",
+      "fallbacks": [],
+      "fallback_on_status": [429, 500, 502, 503, 504]
+    },
     "anthropic": { "upstream_url": "https://api.anthropic.com" },
     "gemini": { "upstream_url": "https://generativelanguage.googleapis.com" },
     "ollama": { "upstream_url": "http://127.0.0.1:11434" },
-    "custom": { "upstream_url": "https://your-provider.example/v1" }
+    "relay": { "upstream_url": "https://your-relay.example/v1", "fallbacks": ["openai"] }
   },
   "guard": {
     "daily_cost_limit_usd": 0,
@@ -18,16 +25,27 @@
     "monthly_tokens_limit": 0,
     "warning_threshold_pct": 80,
     "action_on_breach": "block",
-    "timezone": "UTC"
+    "timezone": "UTC",
+    "projects": {
+      "batch": { "daily_cost_limit_usd": 5, "monthly_cost_limit_usd": 50 }
+    }
   },
   "limits": {
-    "rate_limit": { "enabled": false, "rps": 0, "burst_size": 0 }
+    "rate_limit": {
+      "enabled": false,
+      "rps": 10,
+      "burst_size": 20,
+      "projects": { "batch": { "rps": 2, "burst_size": 4 } },
+      "clients": { "claude": { "rps": 5 } }
+    }
   },
   "alerts": {
+    "webhook_url": "",
     "slack_url": "",
     "discord_url": "",
     "telegram": { "bot_token_env": "ODO_TELEGRAM_TOKEN", "chat_id": "" },
-    "email": { "smtp_host": "", "smtp_port": 587, "username": "", "password": "", "from_addr": "", "to_addr": "" }
+    "email": { "smtp_host": "", "smtp_port": 587, "username": "", "password": "", "from_addr": "", "to_addr": "" },
+    "retry": { "max_attempts": 5, "base_delay_seconds": 30, "max_delay_seconds": 3600 }
   },
   "token_counter": {
     "enabled": true,
@@ -49,5 +67,18 @@
       "omo": "~/.omo/agent/sessions"
     }
   },
-  "cache": { "semantic": { "enabled": false, "ttl": 3600 } }
+  "storage": {
+    "token_events_retention_days": 0,
+    "vacuum_after_retention": false
+  },
+  "scheduled_import": {
+    "enabled": false,
+    "interval": "24h",
+    "clis": []
+  },
+  "otel": {
+    "enabled": false,
+    "endpoint": "http://127.0.0.1:4318",
+    "interval_seconds": 60
+  }
 }

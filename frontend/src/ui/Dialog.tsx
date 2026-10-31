@@ -6,13 +6,19 @@ import { useLocale } from '../i18n/useLocale'
 export function Dialog({ open, onClose, title, children }: { open: boolean; onClose: () => void; title: string; children: ReactNode }) {
   const { t } = useLocale()
   const closeBtnRef = useRef<HTMLButtonElement>(null)
+  // Callers pass an inline arrow, so the identity changes on every parent
+  // render. Reading it through a ref keeps the focus trap and the restore of
+  // the previous element tied to `open` alone; otherwise each keystroke in a
+  // form inside the dialog stole focus back to the close button.
+  const onCloseRef = useRef(onClose)
+  onCloseRef.current = onClose
   useEffect(() => {
     if (!open) return
     const prev = document.activeElement as HTMLElement | null
     closeBtnRef.current?.focus()
     const root = document.getElementById('dialog-root')
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose()
+      if (e.key === 'Escape') onCloseRef.current()
       if (e.key === 'Tab' && root) {
         const focusable = Array.from(root.querySelectorAll<HTMLElement>('button,[href],input,select,textarea,[tabindex]:not([tabindex="-1"])'))
         if (focusable.length === 0) return
@@ -27,7 +33,7 @@ export function Dialog({ open, onClose, title, children }: { open: boolean; onCl
       window.removeEventListener('keydown', onKey)
       prev?.focus()
     }
-  }, [open, onClose])
+  }, [open])
 
   return (
     <AnimatePresence>

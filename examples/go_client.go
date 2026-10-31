@@ -195,7 +195,7 @@ func (c *TokenCounterClient) Metrics() (map[string]any, error) {
 }
 
 func main() {
-	client := NewTokenCounterClient("http://127.0.0.1:8081")
+	client := NewTokenCounterClient("http://127.0.0.1:8080")
 
 	fmt.Println("=== Health Check ===")
 	health, err := client.Health()

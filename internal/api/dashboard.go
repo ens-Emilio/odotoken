@@ -412,6 +412,8 @@ func dashboardRouter(
 				"ttfb_ms":            e.TTFBMs,
 				"streaming_ms":       e.StreamingMs,
 				"tags":               e.Tags,
+				"session_id":         e.SessionID,
+				"run_id":             e.RunID,
 			})
 		}
 
@@ -632,6 +634,8 @@ func dashboardRouter(
 				"ttfb_ms":            e.TTFBMs,
 				"streaming_ms":       e.StreamingMs,
 				"tags":               e.Tags,
+				"session_id":         e.SessionID,
+				"run_id":             e.RunID,
 			})
 		}
 		writeJSON(w, http.StatusOK, eventRows)

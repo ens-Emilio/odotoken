@@ -24,8 +24,13 @@ func IdentifyProvider(path string, headers map[string]string) string {
 	}
 }
 
-// IdentifyClientApp infers client app from User-Agent or custom headers.
+// IdentifyClientApp uses X-Odo-Client as the canonical attribution when a
+// known client key has assigned one. Requests without that header retain the
+// existing X-Client-App, then User-Agent precedence.
 func IdentifyClientApp(headers map[string]string) string {
+	if client := headers["x-odo-client"]; client != "" {
+		return client
+	}
 	ua := strings.ToLower(headers["user-agent"])
 	custom := headers["x-client-app"]
 	if custom != "" {

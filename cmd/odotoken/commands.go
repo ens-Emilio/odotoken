@@ -80,6 +80,15 @@ func newStartCmd() *cobra.Command {
 			ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 			defer stop()
 
+			// Background work the daemon owns: durable alert delivery, token
+			// event retention, the scheduled import, and the OTLP export. Each
+			// is independent, so one failing pass cannot stop the others.
+			go srv.Guard.StartAlertWorker(ctx, 5*time.Second)
+			go runRetentionWorker(ctx, database, cfg, logger)
+			go runScheduledImport(ctx, database, cfg, logger)
+			if srv.Otel != nil {
+				go srv.Otel.Start(ctx)
+			}
 			go func() {
 				logger.Info("starting odotoken", "addr", addr)
 				if err := httpSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
@@ -167,7 +176,7 @@ func newStatusCmd() *cobra.Command {
 				return nil
 			}
 			client := &http.Client{Timeout: 3 * time.Second}
-			resp, err := client.Get("http://" + addr + "/v1/health")
+			resp, err := client.Get("http://" + addr + "/health")
 			if err != nil {
 				fmt.Println("status: not running")
 				return nil

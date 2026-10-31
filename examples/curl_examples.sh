@@ -1,7 +1,7 @@
 #!/bin/bash
 # API examples using curl
 
-BASE_URL="http://127.0.0.1:8081"
+BASE_URL="http://127.0.0.1:8080"
 
 # Count text
 curl -X POST "$BASE_URL/v1/count" \

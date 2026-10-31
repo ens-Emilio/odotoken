@@ -35,7 +35,8 @@ CREATE TABLE IF NOT EXISTS token_events (
 	source TEXT NOT NULL DEFAULT 'proxy',
 	session_id TEXT NOT NULL DEFAULT '',
 	session_file TEXT NOT NULL DEFAULT '',
-	entry_id TEXT NOT NULL DEFAULT ''
+	entry_id TEXT NOT NULL DEFAULT '',
+	run_id TEXT NOT NULL DEFAULT ''
 );
 
 CREATE INDEX IF NOT EXISTS idx_events_timestamp ON token_events(timestamp);
@@ -92,6 +93,20 @@ CREATE TABLE IF NOT EXISTS import_runs (
 	report TEXT NOT NULL DEFAULT '{}'
 );
 CREATE INDEX IF NOT EXISTS idx_import_runs_started ON import_runs(started_at DESC);
+
+CREATE TABLE IF NOT EXISTS alert_outbox (
+	id INTEGER PRIMARY KEY AUTOINCREMENT,
+	created_at TEXT NOT NULL,
+	channel TEXT NOT NULL,
+	target TEXT NOT NULL DEFAULT '',
+	payload TEXT NOT NULL,
+	attempts INTEGER NOT NULL DEFAULT 0,
+	next_attempt_at TEXT NOT NULL,
+	last_error TEXT NOT NULL DEFAULT '',
+	delivered_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_alert_outbox_due
+	ON alert_outbox(delivered_at, next_attempt_at);
 `
 
 // Database wraps SQLite operations.
@@ -130,7 +145,22 @@ func Open(path string) (*Database, error) {
 		return nil, fmt.Errorf("migrate import dedup: %w", err)
 	}
 
+	if err := migrateEventRunID(sqlDB); err != nil {
+		sqlDB.Close()
+		return nil, fmt.Errorf("migrate event run_id: %w", err)
+	}
+
 	return &Database{db: sqlDB}, nil
+}
+
+// migrateEventRunID upgrades token_events created before run_id existed.
+func migrateEventRunID(sqlDB *sql.DB) error {
+	if _, err := sqlDB.Exec(`ALTER TABLE token_events ADD COLUMN run_id TEXT NOT NULL DEFAULT ''`); err != nil &&
+		!strings.Contains(err.Error(), "duplicate column name") {
+		return err
+	}
+	_, err := sqlDB.Exec(`CREATE INDEX IF NOT EXISTS idx_events_run ON token_events(run_id)`)
+	return err
 }
 
 // Close closes the database connection.
@@ -146,8 +176,8 @@ func (d *Database) InsertEvent(e domain.TokenEvent) (int64, error) {
 		cache_read_tokens, cache_write_tokens,
 		cost_usd, shadow_cost, latency_ms, ttfb_ms, streaming_ms,
 		status_code, project_id, tags, metadata, source,
-		session_id, session_file, entry_id
-	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+		session_id, session_file, entry_id, run_id
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
 
 	ts := e.Timestamp.Format(time.RFC3339Nano)
 	if e.Timestamp.IsZero() {
@@ -160,7 +190,7 @@ func (d *Database) InsertEvent(e domain.TokenEvent) (int64, error) {
 		e.CacheReadTokens, e.CacheWriteTokens,
 		e.CostUSD, e.ShadowCost, e.LatencyMs, e.TTFBMs, e.StreamingMs,
 		e.StatusCode, e.ProjectID, e.Tags, e.Metadata, e.Source,
-		e.SessionID, e.SessionFile, e.EntryID,
+		e.SessionID, e.SessionFile, e.EntryID, e.RunID,
 	)
 	if err != nil {
 		return 0, fmt.Errorf("insert event: %w", err)
@@ -197,8 +227,8 @@ func (d *Database) InsertEvents(events []domain.TokenEvent) (InsertResult, error
 		cache_read_tokens, cache_write_tokens,
 		cost_usd, shadow_cost, latency_ms, ttfb_ms, streaming_ms,
 		status_code, project_id, tags, metadata, source,
-		session_id, session_file, entry_id
-	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+		session_id, session_file, entry_id, run_id
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
 	if err != nil {
 		return result, fmt.Errorf("prepare insert: %w", err)
 	}
@@ -215,7 +245,7 @@ func (d *Database) InsertEvents(events []domain.TokenEvent) (InsertResult, error
 			e.CacheReadTokens, e.CacheWriteTokens,
 			e.CostUSD, e.ShadowCost, e.LatencyMs, e.TTFBMs, e.StreamingMs,
 			e.StatusCode, e.ProjectID, e.Tags, e.Metadata, e.Source,
-			e.SessionID, e.SessionFile, e.EntryID,
+			e.SessionID, e.SessionFile, e.EntryID, e.RunID,
 		)
 		if err != nil {
 			return result, fmt.Errorf("insert event batch: %w", err)
@@ -492,6 +522,16 @@ func (d *Database) GetCostSummary(projectID string) (CostSummary, error) {
 // GetCostSummaryInLocation calculates the budget window in loc, so a dashboard
 // configured for a local timezone and the guard agree on when a day begins.
 func (d *Database) GetCostSummaryInLocation(projectID string, loc *time.Location) (CostSummary, error) {
+	return d.costSummary(projectID, "", loc)
+}
+
+// GetClientCostSummaryInLocation narrows the same window to one client, which
+// is what a per-key quota measures. An empty clientApp matches every client.
+func (d *Database) GetClientCostSummaryInLocation(projectID, clientApp string, loc *time.Location) (CostSummary, error) {
+	return d.costSummary(projectID, clientApp, loc)
+}
+
+func (d *Database) costSummary(projectID, clientApp string, loc *time.Location) (CostSummary, error) {
 	if loc == nil {
 		loc = time.UTC
 	}
@@ -504,14 +544,20 @@ func (d *Database) GetCostSummaryInLocation(projectID string, loc *time.Location
 		COALESCE(SUM(CASE WHEN timestamp >= ? THEN total_tokens ELSE 0 END), 0),
 		COALESCE(SUM(CASE WHEN timestamp >= ? THEN total_tokens ELSE 0 END), 0)
 	FROM token_events WHERE project_id = ? AND source NOT LIKE 'import:%'`
-	var s CostSummary
-	err := d.db.QueryRow(q,
+	args := []interface{}{
 		dayStart.UTC().Format(time.RFC3339),
 		monthStart.UTC().Format(time.RFC3339),
 		dayStart.UTC().Format(time.RFC3339),
 		monthStart.UTC().Format(time.RFC3339),
 		projectID,
-	).Scan(&s.DailyCostUSD, &s.MonthlyCostUSD, &s.DailyTokens, &s.MonthlyTokens)
+	}
+	if clientApp != "" {
+		q += ` AND client_app = ?`
+		args = append(args, clientApp)
+	}
+	var s CostSummary
+	err := d.db.QueryRow(q, args...).
+		Scan(&s.DailyCostUSD, &s.MonthlyCostUSD, &s.DailyTokens, &s.MonthlyTokens)
 	if err != nil {
 		return s, fmt.Errorf("cost summary: %w", err)
 	}
@@ -528,7 +574,7 @@ func (d *Database) RecentEvents(limit int, projectID string) ([]domain.TokenEven
 		cache_read_tokens, cache_write_tokens,
 		cost_usd, shadow_cost, latency_ms, ttfb_ms, streaming_ms,
 		status_code, project_id, tags, metadata, source,
-		session_id, session_file, entry_id
+		session_id, session_file, entry_id, run_id
 	FROM token_events`
 	args := []interface{}{}
 	if projectID != "" {
@@ -553,7 +599,7 @@ func (d *Database) RecentEvents(limit int, projectID string) ([]domain.TokenEven
 			&e.CacheReadTokens, &e.CacheWriteTokens,
 			&e.CostUSD, &e.ShadowCost, &e.LatencyMs, &e.TTFBMs, &e.StreamingMs,
 			&e.StatusCode, &e.ProjectID, &e.Tags, &e.Metadata, &e.Source,
-			&e.SessionID, &e.SessionFile, &e.EntryID); err != nil {
+			&e.SessionID, &e.SessionFile, &e.EntryID, &e.RunID); err != nil {
 			return nil, fmt.Errorf("scan event: %w", err)
 		}
 		e.Timestamp, _ = time.Parse(time.RFC3339Nano, ts)
@@ -1219,7 +1265,6 @@ func (d *Database) GetLiveTPS(seconds int) (float64, error) {
 		 FROM token_events
 		 WHERE CAST(strftime('%s', timestamp) AS INTEGER) >= ?
 		   AND source = 'proxy'
-		   AND source = 'proxy'
 		   AND (streaming_ms > 0 OR latency_ms > 0)`, cutoffUnix).
 		Scan(&completion, &genSecs)
 	if err != nil || genSecs <= 0 {
@@ -1238,7 +1283,7 @@ func (d *Database) RecentEventsFiltered(limit int, since, project, source, tag s
 		cache_read_tokens, cache_write_tokens,
 		cost_usd, shadow_cost, latency_ms, ttfb_ms, streaming_ms,
 		status_code, project_id, tags, metadata, source,
-		session_id, session_file, entry_id
+		session_id, session_file, entry_id, run_id
 		FROM token_events WHERE 1=1`
 	args := []interface{}{}
 	if since != "" {
@@ -1270,7 +1315,7 @@ func (d *Database) RecentEventsFiltered(limit int, since, project, source, tag s
 			&e.CacheReadTokens, &e.CacheWriteTokens,
 			&e.CostUSD, &e.ShadowCost, &e.LatencyMs, &e.TTFBMs, &e.StreamingMs,
 			&e.StatusCode, &e.ProjectID, &e.Tags, &e.Metadata, &e.Source,
-			&e.SessionID, &e.SessionFile, &e.EntryID); err != nil {
+			&e.SessionID, &e.SessionFile, &e.EntryID, &e.RunID); err != nil {
 			return nil, err
 		}
 		e.Timestamp, _ = time.Parse(time.RFC3339Nano, ts)
