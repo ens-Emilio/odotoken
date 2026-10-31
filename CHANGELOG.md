@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [0.8.1] - 2026-10-31
+### Fixed
+- Graceful shutdown now drains in-flight event writes before exit to prevent silent token-event loss during restarts.
+- Daemon startup uses `flock` on the PID file to reject duplicate instances instead of silently overwriting.
+
 ## [0.8.0] - 2026-10-30
 ### Added
 - Prometheus `GET /metrics`, `odotoken doctor`, and read-only `odotoken mcp` stdio analytics.

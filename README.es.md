@@ -2,7 +2,7 @@
 
 Proxy transparente de medición de tokens de IA entre tus agentes CLI y los proveedores LLM. Mide uso, calcula costo real y aplica límites de presupuesto.
 
-**v0.8.0** · dashboard en 20 idiomas · importación de sesiones locales · [Português (Brasil)](README.pt-BR.md) · [English](README.md) · [todos los quick starts](docs/i18n/README.md)
+**v0.8.1** · dashboard en 20 idiomas · importación de sesiones locales · [Português (Brasil)](README.pt-BR.md) · [English](README.md) · [todos los quick starts](docs/i18n/README.md)
 
 ## Cómo funciona
 

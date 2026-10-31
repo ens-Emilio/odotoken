@@ -69,13 +69,27 @@ func newStartCmd() *cobra.Command {
 			}
 
 			pidFile, err := daemonPIDFile()
+			var pidFD int
 			if err == nil {
-				err = os.WriteFile(pidFile, []byte(fmt.Sprintf("%d %s\n", os.Getpid(), addr)), 0o600)
+				pidFD, err = syscall.Open(pidFile, syscall.O_CREAT|syscall.O_RDWR|syscall.O_TRUNC, 0o600)
+			}
+			if err == nil {
+				if flockErr := syscall.Flock(pidFD, syscall.LOCK_EX|syscall.LOCK_NB); flockErr != nil {
+					syscall.Close(pidFD)
+					return fmt.Errorf("another odotoken daemon is already running (pid file locked): %w", flockErr)
+				}
+				_, _ = syscall.Write(pidFD, []byte(fmt.Sprintf("%d %s\n", os.Getpid(), addr)))
 			}
 			if err != nil {
-				logger.Warn("could not write pid file", "error", err)
+				logger.Warn("could not open pid file", "error", err)
 			}
-			defer os.Remove(pidFile)
+			defer func() {
+				if pidFD > 0 {
+					_ = syscall.Flock(pidFD, syscall.LOCK_UN)
+					_ = syscall.Close(pidFD)
+				}
+				_ = os.Remove(pidFile)
+			}()
 
 			ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 			defer stop()
@@ -101,7 +115,11 @@ func newStartCmd() *cobra.Command {
 			logger.Info("shutting down")
 			shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
-			return httpSrv.Shutdown(shutdownCtx)
+			if err := httpSrv.Shutdown(shutdownCtx); err != nil {
+				logger.Error("http server shutdown error", "error", err)
+			}
+			srv.Proxy.WaitPendingWrites()
+			return nil
 		},
 	}
 	cmd.Flags().StringVar(&host, "host", "", "bind host (default: server.bind_host or 127.0.0.1)")

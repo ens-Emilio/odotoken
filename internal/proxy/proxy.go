@@ -41,6 +41,7 @@ type Proxy struct {
 	fallbackStatus  map[string]map[int]bool
 	mu              sync.RWMutex
 	logger          *slog.Logger
+	pendingWrites   sync.WaitGroup
 }
 
 func New(database *db.Database, calc *pricing.Calculator, cfg config.Config, logger *slog.Logger) *Proxy {
@@ -645,11 +646,20 @@ func (p *Proxy) recordEventNow(resp *http.Response, provider, clientApp, project
 		event.SessionID = requestUsage.sessionID
 		event.RunID = requestUsage.runID
 	}
+	p.pendingWrites.Add(1)
 	go func() {
+		defer p.pendingWrites.Done()
 		if _, insertErr := p.db.InsertEvent(event); insertErr != nil {
 			p.logger.Error("failed to insert token event", "error", insertErr)
 		}
 	}()
+}
+
+// WaitPendingWrites blocks until all in-flight recordEventNow goroutines have
+// completed their database inserts. Call after http.Server.Shutdown returns
+// to prevent silent event loss during daemon restart or deploy.
+func (p *Proxy) WaitPendingWrites() {
+	p.pendingWrites.Wait()
 }
 
 func (p *Proxy) errorHandler(w http.ResponseWriter, r *http.Request, err error) {

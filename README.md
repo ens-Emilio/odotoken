@@ -2,7 +2,7 @@
 
 Transparent AI token metering proxy between your CLI agents and LLM providers. Measures usage, calculates real cost, enforces budget limits.
 
-**v0.8.0** · Dashboard in 20 languages · local session import · [Português (Brasil)](README.pt-BR.md) · [Español](README.es.md) · [all quick starts](docs/i18n/README.md)
+**v0.8.1** · Dashboard in 20 languages · local session import · [Português (Brasil)](README.pt-BR.md) · [Español](README.es.md) · [all quick starts](docs/i18n/README.md)
 
 ## How it works
 
