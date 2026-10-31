@@ -3,20 +3,9 @@ package db
 import (
 	"database/sql"
 	"fmt"
-	"strings"
 	"time"
 )
 
-// migrateRunID adds the run_id column to databases created before it existed.
-// A duplicate-column error means the schema already declares it.
-func migrateRunID(sqlDB *sql.DB) error {
-	if _, err := sqlDB.Exec(`ALTER TABLE token_events ADD COLUMN run_id TEXT NOT NULL DEFAULT ''`); err != nil &&
-		!strings.Contains(err.Error(), "duplicate column name") {
-		return err
-	}
-	_, err := sqlDB.Exec(`CREATE INDEX IF NOT EXISTS idx_events_run ON token_events(run_id)`)
-	return err
-}
 
 // RetentionResult reports what a retention pass did, so an operator can tell
 // "nothing old" from "retention disabled".
