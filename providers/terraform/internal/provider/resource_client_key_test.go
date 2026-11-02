@@ -14,7 +14,10 @@ func TestClientKeyResource_CRUD(t *testing.T) {
 		switch {
 		case r.Method == http.MethodPost && r.URL.Path == "/api/client-keys":
 			var req ClientKey
-			json.NewDecoder(r.Body).Decode(&req)
+				if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+					http.Error(w, err.Error(), http.StatusBadRequest)
+					return
+				}
 			resp := ClientKey{
 				ID:        "ck-123",
 				Name:      req.Name,
@@ -22,7 +25,10 @@ func TestClientKeyResource_CRUD(t *testing.T) {
 				CreatedAt: "2026-01-01T00:00:00Z",
 				UpdatedAt: "2026-01-01T00:00:00Z",
 			}
-			json.NewEncoder(w).Encode(resp)
+				if err := json.NewEncoder(w).Encode(resp); err != nil {
+					http.Error(w, err.Error(), http.StatusInternalServerError)
+					return
+				}
 		case r.Method == http.MethodGet && r.URL.Path == "/api/client-keys/ck-123":
 			resp := ClientKey{
 				ID:        "ck-123",
@@ -30,7 +36,10 @@ func TestClientKeyResource_CRUD(t *testing.T) {
 				CreatedAt: "2026-01-01T00:00:00Z",
 				UpdatedAt: "2026-01-01T00:00:00Z",
 			}
-			json.NewEncoder(w).Encode(resp)
+				if err := json.NewEncoder(w).Encode(resp); err != nil {
+					http.Error(w, err.Error(), http.StatusInternalServerError)
+					return
+				}
 		case r.Method == http.MethodPut && r.URL.Path == "/api/client-keys/ck-123":
 			resp := ClientKey{
 				ID:        "ck-123",
@@ -38,7 +47,10 @@ func TestClientKeyResource_CRUD(t *testing.T) {
 				CreatedAt: "2026-01-01T00:00:00Z",
 				UpdatedAt: "2026-01-02T00:00:00Z",
 			}
-			json.NewEncoder(w).Encode(resp)
+				if err := json.NewEncoder(w).Encode(resp); err != nil {
+					http.Error(w, err.Error(), http.StatusInternalServerError)
+					return
+				}
 		case r.Method == http.MethodDelete && r.URL.Path == "/api/client-keys/ck-123":
 			w.WriteHeader(http.StatusNoContent)
 		default:
@@ -97,7 +109,10 @@ func TestClientKeyResource_ListAndHealth(t *testing.T) {
 				{ID: "ck-1", Name: "key-1", CreatedAt: "2026-01-01T00:00:00Z"},
 				{ID: "ck-2", Name: "key-2", CreatedAt: "2026-01-02T00:00:00Z"},
 			}
-			json.NewEncoder(w).Encode(resp)
+				if err := json.NewEncoder(w).Encode(resp); err != nil {
+					http.Error(w, err.Error(), http.StatusInternalServerError)
+					return
+				}
 		case r.Method == http.MethodGet && r.URL.Path == "/health":
 			resp := HealthStatus{
 				Status:   "ok",
@@ -105,10 +120,16 @@ func TestClientKeyResource_ListAndHealth(t *testing.T) {
 				Uptime:   "1h30m",
 				DBStatus: "connected",
 			}
-			json.NewEncoder(w).Encode(resp)
+				if err := json.NewEncoder(w).Encode(resp); err != nil {
+					http.Error(w, err.Error(), http.StatusInternalServerError)
+					return
+				}
 case r.Method == http.MethodGet && r.URL.Path == "/api/models":
 			resp := ModelsResponse{Models: []string{"gpt-4o", "claude-3.5-sonnet"}}
-			json.NewEncoder(w).Encode(resp)
+				if err := json.NewEncoder(w).Encode(resp); err != nil {
+					http.Error(w, err.Error(), http.StatusInternalServerError)
+					return
+				}
 		default:
 			w.WriteHeader(http.StatusNotFound)
 		}
