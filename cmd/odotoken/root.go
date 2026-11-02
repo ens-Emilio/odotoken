@@ -20,7 +20,8 @@ enforces budget limits, and provides detailed usage analytics.`,
 		newPricesCmd(),
 		newImportCmd(),
 		newDoctorCmd(),
-		newMCPCmd(),
+		newInitCmd(),
+		newTailCmd(),
 	)
 	return rootCmd
 }

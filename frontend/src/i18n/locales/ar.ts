@@ -11,7 +11,7 @@ export const ar: LocaleMessages = {
   'nav.settings': 'الإعدادات',
   'nav.import': 'الاستيراد',
   'nav.monitor': 'المراقبة',
-  'nav.control': 'التحكم',
+
 
   'shell.openNavigation': 'فتح التنقل',
   'shell.collapse': 'طيّ',
@@ -341,11 +341,6 @@ export const ar: LocaleMessages = {
   'error.auth.unauthorized': 'غير مصرّح.',
   'error.ui.unknown': 'حدث خطأ ما. حاول مرة أخرى.',
 
-  'nav.sessions': 'المحادثات',
-  'nav.cache': 'توفير الذاكرة المؤقتة',
-  'nav.simulate': 'محاكي التكلفة',
-  'nav.prices': 'الأسعار',
-  'nav.anomalies': 'الشذوذات',
   'sessions.subtitle': 'تكلفة كل محادثة من ترويسة جلسة الوسيط أو النص المستورد.',
   'sessions.columnSession': 'الجلسة',
   'sessions.columnWindow': 'البداية',
@@ -411,7 +406,6 @@ export const ar: LocaleMessages = {
   'error.prices.invalid': 'السعر غير صالح.',
   'error.prices.notFound': 'لا تجاوز لهذا الطراز.',
   'error.prices.persist': 'تعذر حفظ الكتالوج.',
-  'nav.clientKeys': "Client keys",
   'clientKeys.subtitle': "One key per client, with the identity and quota it grants.",
   'clientKeys.columnKey': "Key",
   'clientKeys.client': "Client",

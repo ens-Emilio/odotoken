@@ -39,12 +39,12 @@ func IdentifyClientApp(headers map[string]string) string {
 	switch {
 	case strings.Contains(ua, "pi-agent") || strings.Contains(ua, "pi/"):
 		return "pi-agent"
+	case strings.Contains(ua, "opencode"):
+		return "opencode"
 	case strings.Contains(ua, "omp"):
 		return "omp"
 	case strings.Contains(ua, "omo"):
 		return "omo"
-	case strings.Contains(ua, "opencode"):
-		return "opencode"
 	case strings.Contains(ua, "crush"):
 		return "crush"
 	case strings.Contains(ua, "codex"):

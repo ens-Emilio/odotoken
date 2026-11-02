@@ -39,7 +39,7 @@ func TestMetricsExposesRecordedSpend(t *testing.T) {
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	MetricsRouter(database).ServeHTTP(rec, req)
+	MetricsRouter(database, nil).ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200", rec.Code)

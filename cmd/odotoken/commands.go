@@ -97,6 +97,10 @@ func newStartCmd() *cobra.Command {
 			// Background work the daemon owns: durable alert delivery, token
 			// event retention, the scheduled import, and the OTLP export. Each
 			// is independent, so one failing pass cannot stop the others.
+			go config.WatchConfig(ctx, configPath, func(newCfg config.Config) error {
+				srv.Guard.UpdateLimits(newCfg.Guard)
+				return nil
+			}, logger)
 			go srv.Guard.StartAlertWorker(ctx, 5*time.Second)
 			go runRetentionWorker(ctx, database, cfg, logger)
 			go runScheduledImport(ctx, database, cfg, logger)

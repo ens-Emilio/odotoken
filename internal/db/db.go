@@ -150,6 +150,11 @@ func Open(path string) (*Database, error) {
 		return nil, fmt.Errorf("migrate event run_id: %w", err)
 	}
 
+	if err := migrateTraceID(sqlDB); err != nil {
+		sqlDB.Close()
+		return nil, fmt.Errorf("migrate event trace_id: %w", err)
+	}
+
 	return &Database{db: sqlDB}, nil
 }
 
@@ -161,6 +166,15 @@ func migrateEventRunID(sqlDB *sql.DB) error {
 	}
 	_, err := sqlDB.Exec(`CREATE INDEX IF NOT EXISTS idx_events_run ON token_events(run_id)`)
 	return err
+}
+
+// migrateTraceID upgrades token_events created before trace_id existed.
+func migrateTraceID(sqlDB *sql.DB) error {
+	if _, err := sqlDB.Exec(`ALTER TABLE token_events ADD COLUMN trace_id TEXT NOT NULL DEFAULT ''`); err != nil &&
+		!strings.Contains(err.Error(), "duplicate column name") {
+		return err
+	}
+	return nil
 }
 
 // Close closes the database connection.
@@ -176,8 +190,8 @@ func (d *Database) InsertEvent(e domain.TokenEvent) (int64, error) {
 		cache_read_tokens, cache_write_tokens,
 		cost_usd, shadow_cost, latency_ms, ttfb_ms, streaming_ms,
 		status_code, project_id, tags, metadata, source,
-		session_id, session_file, entry_id, run_id
-	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+		session_id, session_file, entry_id, run_id, trace_id
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
 
 	ts := e.Timestamp.Format(time.RFC3339Nano)
 	if e.Timestamp.IsZero() {
@@ -190,7 +204,7 @@ func (d *Database) InsertEvent(e domain.TokenEvent) (int64, error) {
 		e.CacheReadTokens, e.CacheWriteTokens,
 		e.CostUSD, e.ShadowCost, e.LatencyMs, e.TTFBMs, e.StreamingMs,
 		e.StatusCode, e.ProjectID, e.Tags, e.Metadata, e.Source,
-		e.SessionID, e.SessionFile, e.EntryID, e.RunID,
+		e.SessionID, e.SessionFile, e.EntryID, e.RunID, e.TraceID,
 	)
 	if err != nil {
 		return 0, fmt.Errorf("insert event: %w", err)
@@ -227,8 +241,8 @@ func (d *Database) InsertEvents(events []domain.TokenEvent) (InsertResult, error
 		cache_read_tokens, cache_write_tokens,
 		cost_usd, shadow_cost, latency_ms, ttfb_ms, streaming_ms,
 		status_code, project_id, tags, metadata, source,
-		session_id, session_file, entry_id, run_id
-	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+		session_id, session_file, entry_id, run_id, trace_id
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
 	if err != nil {
 		return result, fmt.Errorf("prepare insert: %w", err)
 	}
@@ -245,7 +259,7 @@ func (d *Database) InsertEvents(events []domain.TokenEvent) (InsertResult, error
 			e.CacheReadTokens, e.CacheWriteTokens,
 			e.CostUSD, e.ShadowCost, e.LatencyMs, e.TTFBMs, e.StreamingMs,
 			e.StatusCode, e.ProjectID, e.Tags, e.Metadata, e.Source,
-			e.SessionID, e.SessionFile, e.EntryID, e.RunID,
+			e.SessionID, e.SessionFile, e.EntryID, e.RunID, e.TraceID,
 		)
 		if err != nil {
 			return result, fmt.Errorf("insert event batch: %w", err)

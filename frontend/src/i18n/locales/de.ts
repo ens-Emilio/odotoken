@@ -11,7 +11,7 @@ export const de: LocaleMessages = {
   'nav.settings': 'Einstellungen',
   'nav.import': 'Import',
   'nav.monitor': 'Monitor',
-  'nav.control': 'Steuerung',
+
 
   'shell.openNavigation': 'Navigation öffnen',
   'shell.collapse': 'Einklappen',
@@ -341,11 +341,6 @@ export const de: LocaleMessages = {
   'error.auth.unauthorized': 'Nicht autorisiert.',
   'error.ui.unknown': 'Etwas ist schiefgelaufen. Erneut versuchen.',
 
-  'nav.sessions': 'Gespräche',
-  'nav.cache': 'Cache-Ersparnis',
-  'nav.simulate': 'Kostensimulator',
-  'nav.prices': 'Preise',
-  'nav.anomalies': 'Anomalien',
   'sessions.subtitle': 'Kosten pro Gespräch, aus dem Session-Header des Proxys oder dem importierten Transcript.',
   'sessions.columnSession': 'Sitzung',
   'sessions.columnWindow': 'Beginn',
@@ -411,7 +406,6 @@ export const de: LocaleMessages = {
   'error.prices.invalid': 'Der Preis ist ungültig.',
   'error.prices.notFound': 'Keine Überschreibung für dieses Modell.',
   'error.prices.persist': 'Katalog konnte nicht gespeichert werden.',
-  'nav.clientKeys': "Client keys",
   'clientKeys.subtitle': "One key per client, with the identity and quota it grants.",
   'clientKeys.columnKey': "Key",
   'clientKeys.client': "Client",

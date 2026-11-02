@@ -86,7 +86,11 @@ Dashboard: `http://127.0.0.1:8080/app/` — usage appears within 10s. It runs in
 - Local session import — the Import view and `odotoken import` share one engine and read sessions already on disk from the CLIs listed under `sessions.paths`
 - Import history — per-CLI inserted and duplicate counts, tokens, cost and terminal status
 
-- Prometheus — `GET /metrics` exposes spend, tokens and request counters for scraping; OTLP/HTTP push is optional
+- Prometheus — `GET /metrics` exposes spend, tokens, request counters and per-client latency histograms for scraping; OTLP/HTTP push is optional
+- Observability (v0.9.0) — Semantic Caching (`internal/cache`), LLM-as-Judge Feedback Loop (`internal/guard/judge.go`), Distributed Tracing with W3C Trace Context (`internal/tracing`), Drift Detection of token/cost discrepancies, and per-client P50/P95/P99 latency metrics
+- Security & Governance (v0.10.0) — Automatic PII Redaction for CPFs/emails/tokens (`internal/guard/pii.go`), Prompt Injection Guard with jailbreak heuristics (`internal/guard/injection.go`), Immutable Audit Log with chained integrity hash (`internal/db/audit.go`), and Scoped API Keys with granular permissions (`internal/guard/scoped_keys.go`)
+- Cost Optimization & FinOps (v0.11.0) — Budget Alerts with per-client/project threshold checks (`internal/guard/budget_alert.go`), Automatic Model Downgrade with configurable fallback (`internal/guard/downgrade.go`), Cost Allocation Tags for metadata-based cost splitting (`internal/guard/cost_tags.go`), Idle Timeout & Auto-Pause for inactive sessions (`internal/guard/idle_timeout.go`), and Weekly Executive Report with spend/usage summary (`internal/guard/executive_report.go`)
+- DX & Portfolio (v0.12.0) — Official CLI `odotoken-cli` with health/usage/keys subcommands (`cmd/odotoken-cli/`), and Self-Hosted Health Dashboard endpoint `/health` with JSON status (`internal/api/health_dashboard.go`)
 - Resilience — provider fallback on configured 429/5xx, per-project/client rate limits, durable alert retry, scheduled imports
 - Operations — `odotoken doctor` checks config, database, alerts and schedules; `odotoken export` and `odotoken prices` work without the daemon
 

@@ -20,7 +20,8 @@ import { Select } from './ui/Select'
 import { useFilterOptions, useGuardStatus } from './api'
 import { guardStatusReason } from './guard-reason'
 import type { ViewId } from './views'
-import { OverviewView, ModelsView, ClientsView, EventsView, ThroughputView, GuardView, SettingsView, ImportView, SessionsView, CacheView, SimulateView, PricesView, AnomaliesView, ClientKeysView } from './views'
+import { OverviewView, ModelsView, ClientsView, EventsView, ThroughputView, GuardView, SettingsView, SessionsView, CacheView, SimulateView, PricesView, AnomaliesView, ClientKeysView, ImportView, PlaygroundView } from './views'
+import { ShowcaseView } from './ShowcaseView'
 
 function View({ id, timeFilter, project, source, tag }: { id: ViewId; timeFilter: string; project: string; source: string; tag: string }) {
   switch (id) {
@@ -37,7 +38,10 @@ function View({ id, timeFilter, project, source, tag }: { id: ViewId; timeFilter
     case 'clientKeys': return <ClientKeysView />
     case 'guard': return <GuardView />
     case 'settings': return <SettingsView />
+
     case 'import': return <ImportView />
+    case 'playground': return <PlaygroundView />
+    case 'showcase': return <ShowcaseView />
   }
 }
 
@@ -103,7 +107,7 @@ export default function App() {
     overview: t('nav.overview'), models: t('nav.models'), clients: t('nav.clients'),
     events: t('nav.events'), throughput: t('nav.throughput'), guard: t('nav.guard'),
     settings: t('nav.settings'), import: t('nav.import'), sessions: t('nav.sessions'),
-    cache: t('nav.cache'), simulate: t('nav.simulate'), prices: t('nav.prices'), anomalies: t('nav.anomalies'), clientKeys: t('nav.clientKeys'),
+    cache: t('nav.cache'), simulate: t('nav.simulate'), prices: t('nav.prices'), anomalies: t('nav.anomalies'), clientKeys: t('nav.clientKeys'), playground: t('nav.playground'), showcase: t('nav.showcase'),
   }
 
   return (

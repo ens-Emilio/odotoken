@@ -164,6 +164,7 @@ func (p *Proxy) Handler() http.Handler {
 		handler = p.guardMiddleware(handler)
 	}
 	// Intercept request body to extract model before proxying
+	handler = traceMiddleware(handler)
 	handler = p.activeRunMiddleware(handler)
 	handler = p.extractModelMiddleware(handler)
 	if p.keys != nil {
@@ -415,6 +416,11 @@ func (p *Proxy) modifyResponse(resp *http.Response) error {
 			}
 			result := p.guard.Check(projectID)
 			if result.Allowed || result.ActionOnBreach != "block" {
+				return ""
+			}
+			if p.guard.Limits().DryRun {
+				p.logger.Warn("dry-run guard: would block request", "project", projectID, "reason", result.Message)
+				guard.IncrementDryRunBlocks()
 				return ""
 			}
 			return result.Message
@@ -726,8 +732,13 @@ func (p *Proxy) guardMiddleware(next http.Handler) http.Handler {
 			result = p.guard.Check(projectID)
 		}
 		if !result.Allowed && result.ActionOnBreach == "block" {
-			http.Error(w, result.Message, http.StatusTooManyRequests)
-			return
+			if p.guard.Limits().DryRun {
+				p.logger.Warn("dry-run guard: would block request", "project", projectID, "reason", result.Message)
+				guard.IncrementDryRunBlocks()
+			} else {
+				http.Error(w, result.Message, http.StatusTooManyRequests)
+				return
+			}
 		}
 		next.ServeHTTP(w, r)
 	})

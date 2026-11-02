@@ -1,4 +1,4 @@
-export type ViewId = 'overview' | 'models' | 'clients' | 'events' | 'throughput' | 'guard' | 'settings' | 'import' | 'sessions' | 'cache' | 'simulate' | 'prices' | 'anomalies' | 'clientKeys'
+export type ViewId = 'overview' | 'models' | 'clients' | 'events' | 'throughput' | 'guard' | 'settings' | 'import' | 'sessions' | 'cache' | 'simulate' | 'prices' | 'anomalies' | 'clientKeys' | 'playground' | 'showcase'
 
 export { default as OverviewView } from './OverviewView'
 export { default as ModelsView } from './ModelsView'
@@ -14,3 +14,4 @@ export { default as SimulateView } from './SimulateView'
 export { default as PricesView } from './PricesView'
 export { default as AnomaliesView } from './AnomaliesView'
 export { default as ClientKeysView } from './ClientKeysView'
+export { default as PlaygroundView } from './PlaygroundView'

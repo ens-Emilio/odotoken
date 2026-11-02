@@ -48,6 +48,7 @@ type UpstreamConfig struct {
 	UpstreamURL      string   `json:"upstream_url"`
 	Fallbacks        []string `json:"fallbacks,omitempty"`
 	FallbackOnStatus []int    `json:"fallback_on_status,omitempty"`
+	SLO              SLOConfig `json:"slo"`
 }
 
 // TokenCounterConfig controls token counting behavior.
@@ -65,6 +66,12 @@ type ProviderConfig struct {
 	TimeoutSeconds float64 `json:"timeout_seconds"`
 	MaxRetries     int     `json:"max_retries"`
 	CountEndpoint  string  `json:"count_endpoint"`
+}
+
+// SLOConfig controls error-budget tracking for a provider.
+type SLOConfig struct {
+	Enabled      bool    `json:"enabled"`
+	Availability float64 `json:"availability"`
 }
 
 // HeuristicConfig for fallback token counting.
@@ -138,9 +145,11 @@ type GuardConfig struct {
 	DailyTokenLimit     int                           `json:"daily_tokens_limit"`
 	MonthlyTokenLimit   int                           `json:"monthly_tokens_limit"`
 	WarningThresholdPct float64                       `json:"warning_threshold_pct"`
+	DryRun              bool                          `json:"dry_run"`
 	ActionOnBreach      string                        `json:"action_on_breach"`
 	Timezone            string                        `json:"timezone"`
-	Projects            map[string]ProjectGuardConfig `json:"projects,omitempty"`
+	TokenDriftEnabled bool                          `json:"token_drift_enabled"`
+	Projects          map[string]ProjectGuardConfig `json:"projects,omitempty"`
 }
 
 // ProjectGuardConfig is a partial override: nil means "inherit global".

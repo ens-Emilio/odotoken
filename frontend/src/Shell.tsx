@@ -19,11 +19,13 @@ const VIEW_LABEL_KEYS: Record<ViewId, string> = {
   simulate: 'nav.simulate',
   prices: 'nav.prices',
   anomalies: 'nav.anomalies',
-  clientKeys: 'nav.clientKeys',
+	 clientKeys: 'nav.clientKeys',
+	 playground: 'nav.playground',
+	 showcase: 'nav.showcase',
 }
 const VIEW_GROUPS: { labelKey: string; ids: ViewId[] }[] = [
-  { labelKey: 'nav.monitor', ids: ['overview', 'models', 'clients', 'events', 'throughput', 'sessions', 'cache', 'anomalies'] },
-  { labelKey: 'nav.control', ids: ['guard', 'settings', 'import', 'simulate', 'prices', 'clientKeys'] },
+	  { labelKey: 'nav.monitor', ids: ['overview', 'models', 'clients', 'events', 'throughput', 'sessions', 'cache', 'anomalies', 'playground'] },
+		  { labelKey: 'nav.control', ids: ['guard', 'settings', 'import', 'simulate', 'prices', 'clientKeys'] },
 ]
 
 export function Sidebar({ view, onView, guardBreached, open, onToggle }: { view: ViewId; onView: (v: ViewId) => void; guardBreached: boolean; open: boolean; onToggle: () => void }) {

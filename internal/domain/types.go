@@ -28,6 +28,7 @@ type TokenEvent struct {
 	SessionFile      string    `json:"session_file"`
 	EntryID          string    `json:"entry_id"`
 	RunID            string    `json:"run_id"`
+	TraceID          string    `json:"trace_id"`
 }
 
 // UsageResult holds parsed token usage from a response or stream. Estimated

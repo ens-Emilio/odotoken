@@ -100,7 +100,7 @@ func NewWithConfigPath(database *db.Database, cfg config.Config, logger *slog.Lo
 		importers.NewEngine(importers.Paths(cfg.Sessions.Paths), calc, database))
 	api.RegisterClientKeyRoutes(dashboard, keys)
 	api.RegisterAnalyticsRoutes(dashboard, database, calc, "prices.json")
-	r.Mount("/metrics", authed(api.MetricsRouter(database)))
+	r.Mount("/metrics", authed(api.MetricsRouter(database, nil)))
 	r.Mount("/api", authed(dashboard))
 
 	// Liveness of odotoken itself. Deliberately unauthenticated and outside the

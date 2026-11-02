@@ -3,6 +3,7 @@ package db
 import (
 	"database/sql"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -203,4 +204,87 @@ func (d *Database) LatencyBuckets(bounds []float64) ([]LatencyBucket, int64, err
 		return nil, 0, err
 	}
 	return out, total, nil
+}
+
+// ClientLatencyBucket holds one histogram bucket for a specific client_app.
+type ClientLatencyBucket struct {
+	ClientApp string
+	Le        float64
+	Count     int64
+}
+
+// ClientLatencyStats holds aggregate latency stats per client_app for Prometheus histograms.
+type ClientLatencyStats struct {
+	ClientApp string
+	SumMs     float64
+	Count     int64
+}
+
+// ClientLatencyBuckets returns cumulative latency histogram buckets grouped by
+// client_app using a single GROUP BY query to avoid N+1 performance issues.
+func (d *Database) ClientLatencyBuckets(bounds []float64) ([]ClientLatencyBucket, []ClientLatencyStats, error) {
+	if len(bounds) == 0 {
+		return nil, nil, nil
+	}
+
+	// Build conditional SUM expressions for each bucket bound in a single pass.
+	var selectParts []string
+	selectParts = append(selectParts, "client_app")
+	for _, le := range bounds {
+		selectParts = append(selectParts, fmt.Sprintf("SUM(CASE WHEN latency_ms <= %g THEN 1 ELSE 0 END)", le))
+	}
+	selectParts = append(selectParts, "SUM(latency_ms)", "COUNT(*)")
+
+	query := fmt.Sprintf(`SELECT %s FROM token_events WHERE latency_ms >= 0 AND client_app != '' GROUP BY client_app`,
+		strings.Join(selectParts, ", "))
+
+	rows, err := d.db.Query(query)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer rows.Close()
+
+	var buckets []ClientLatencyBucket
+	var stats []ClientLatencyStats
+	for rows.Next() {
+		// Scan columns: client_app, bucket_0, bucket_1, ..., sum, count
+		vals := make([]interface{}, 3+len(bounds))
+		var client string
+		vals[0] = &client
+		bucketCounts := make([]int64, len(bounds))
+		for i := range bounds {
+			vals[1+i] = &bucketCounts[i]
+		}
+		var sumMs float64
+		var count int64
+		vals[1+len(bounds)] = &sumMs
+		vals[2+len(bounds)] = &count
+
+		if err := rows.Scan(vals...); err != nil {
+			return nil, nil, err
+		}
+
+		// Convert non-cumulative counts to cumulative histogram buckets.
+		var cumulative int64
+		for i, le := range bounds {
+			cumulative += bucketCounts[i]
+			buckets = append(buckets, ClientLatencyBucket{ClientApp: client, Le: le, Count: cumulative})
+		}
+		stats = append(stats, ClientLatencyStats{ClientApp: client, SumMs: sumMs, Count: count})
+	}
+	if err := rows.Err(); err != nil {
+		return nil, nil, err
+	}
+	return buckets, stats, nil
+}
+
+// ErrorBudgetWindow counts total requests and errors (status >= 400) for a
+// provider since the given time. Used by SLOTracker to compute burn rate.
+func (d *Database) ErrorBudgetWindow(provider string, since time.Time) (total, errors int64, err error) {
+	row := d.db.QueryRow(`SELECT COUNT(*), SUM(CASE WHEN status_code >= 400 THEN 1 ELSE 0 END)
+		FROM token_events WHERE provider = ? AND created_at >= ?`, provider, since)
+	if err := row.Scan(&total, &errors); err != nil {
+		return 0, 0, err
+	}
+	return total, errors, nil
 }

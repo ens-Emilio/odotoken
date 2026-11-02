@@ -43,6 +43,7 @@ func dashboardRouter(
 	if engine != nil {
 		registerImportRoutes(r, database, engine, configPath)
 	}
+	RegisterHealthRoutes(r, database)
 	limitsView := func(v config.GuardConfig) map[string]interface{} {
 		limit := func(value float64) interface{} {
 			if value == 0 {
@@ -808,7 +809,7 @@ func dashboardRouter(
 		}
 		writeJSON(w, http.StatusOK, sessionRows)
 	})
-
+	RegisterLatencyRoutes(r, database)
 	return r
 }
 

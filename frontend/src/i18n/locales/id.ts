@@ -13,6 +13,7 @@ export const id: LocaleMessages = {
   'nav.monitor': 'Pemantauan',
   'nav.control': 'Kontrol',
 
+
   'shell.openNavigation': 'Buka navigasi',
   'shell.collapse': 'Ciutkan',
   'shell.collapseSidebar': 'Ciutkan bilah samping',
@@ -341,11 +342,6 @@ export const id: LocaleMessages = {
   'error.auth.unauthorized': 'Tidak diizinkan.',
   'error.ui.unknown': 'Terjadi kesalahan. Coba lagi.',
 
-  'nav.sessions': 'Percakapan',
-  'nav.cache': 'Hemat cache',
-  'nav.simulate': 'Simulator biaya',
-  'nav.prices': 'Harga',
-  'nav.anomalies': 'Anomali',
   'sessions.subtitle': 'Biaya per percakapan dari header sesi proxy atau transkrip yang diimpor.',
   'sessions.columnSession': 'Sesi',
   'sessions.columnWindow': 'Mulai',
@@ -411,7 +407,6 @@ export const id: LocaleMessages = {
   'error.prices.invalid': 'Harga tidak valid.',
   'error.prices.notFound': 'Tidak ada penimpaan untuk model ini.',
   'error.prices.persist': 'Katalog tidak dapat disimpan.',
-  'nav.clientKeys': "Client keys",
   'clientKeys.subtitle': "One key per client, with the identity and quota it grants.",
   'clientKeys.columnKey': "Key",
   'clientKeys.client': "Client",

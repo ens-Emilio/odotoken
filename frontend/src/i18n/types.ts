@@ -19,8 +19,15 @@ export interface Dict {
   'nav.settings': string
   'nav.import': string
   'nav.monitor': string
-  'nav.control': string
-
+ 'nav.control': string
+	 'nav.playground': string
+	 'nav.showcase': string
+ 'nav.sessions': string
+ 'nav.cache': string
+ 'nav.simulate': string
+ 'nav.prices': string
+ 'nav.anomalies': string
+ 'nav.clientKeys': string
   // Shell and header
   'shell.openNavigation': string
   'shell.collapse': string
@@ -339,12 +346,6 @@ export interface Dict {
   'calendar.loadError': string
 
   // Cost analytics: sessions, cache KPI, simulation, prices, anomalies
-  'nav.sessions': string
-  'nav.cache': string
-  'nav.simulate': string
-  'nav.prices': string
-  'nav.anomalies': string
-  'nav.clientKeys': string
   'sessions.subtitle': string
   'sessions.columnSession': string
   'sessions.columnWindow': string

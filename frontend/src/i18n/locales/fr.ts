@@ -11,7 +11,7 @@ export const fr: LocaleMessages = {
   'nav.settings': 'Réglages',
   'nav.import': 'Importer',
   'nav.monitor': 'Surveiller',
-  'nav.control': 'Contrôler',
+
 
   'shell.openNavigation': 'Ouvrir la navigation',
   'shell.collapse': 'Réduire',
@@ -341,11 +341,6 @@ export const fr: LocaleMessages = {
   'error.auth.unauthorized': 'Non autorisé.',
   'error.ui.unknown': 'Une erreur est survenue. Réessayez.',
 
-  'nav.sessions': 'Conversations',
-  'nav.cache': 'Économie du cache',
-  'nav.simulate': 'Simulateur de coût',
-  'nav.prices': 'Tarifs',
-  'nav.anomalies': 'Anomalies',
   'sessions.subtitle': 'Coût par conversation, depuis l\'en-tête de session du proxy ou le transcript importé.',
   'sessions.columnSession': 'Session',
   'sessions.columnWindow': 'Début',
@@ -411,7 +406,6 @@ export const fr: LocaleMessages = {
   'error.prices.invalid': 'Le tarif est invalide.',
   'error.prices.notFound': 'Aucune substitution pour ce modèle.',
   'error.prices.persist': 'Impossible d\'enregistrer le catalogue.',
-  'nav.clientKeys': "Client keys",
   'clientKeys.subtitle': "One key per client, with the identity and quota it grants.",
   'clientKeys.columnKey': "Key",
   'clientKeys.client': "Client",

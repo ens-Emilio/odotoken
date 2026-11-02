@@ -4,6 +4,44 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-11-02 — Feature 17: Terraform Provider & Sanitização
+### Added
+- Terraform Provider em `providers/terraform/` com recursos `client_key`, `price_rule`, `guard_policy` e data sources `client_keys`, `models`, `health` (Feature 17)
+- Scripts de validação externa `scripts/benchmark.sh` e `scripts/security-audit.sh` (Fase 5)
+
+### Changed
+- Versão do backend, frontend e package.json alinhadas para 0.13.0
+- Documentação atualizada com todas as features das Fases 1-5
+
+## [0.12.0] - 2026-11-02 — Fase 4 DX & Portfólio
+### Added
+- CLI Oficial `odotoken-cli` com subcomandos health/usage/keys (Feature 16)
+- Self-Hosted Health Dashboard endpoint `/health` com status JSON (Feature 20)
+
+## [0.11.0] - 2026-11-02 — Fase 3 Otimização de Custos
+### Added
+- Budget Alerts com verificação de limite por cliente/projeto (Feature 6)
+- Model Downgrade Automático com fallback configurável (Feature 7)
+- Cost Allocation Tags para rateio de custos por metadados (Feature 8)
+- Idle Timeout & Auto-Pause para sessões inativas (Feature 9)
+- Relatório Executivo Semanal com resumo de gastos e uso (Feature 10)
+
+## [0.10.0] - 2026-11-02 — Fase 2 Segurança & Governança
+### Added
+- PII Redaction Automática para CPFs, emails e tokens (Feature 1)
+- Prompt Injection Guard com heurísticas de jailbreak (Feature 2)
+- Audit Log Imutável com hash de integridade encadeado (Feature 4)
+- Scoped API Keys com permissões granulares por modelo/custo/tempo (Feature 5)
+
+## [0.9.0] - 2026-11-02 — Fase 1 Observabilidade
+### Added
+- Drift Detection (Feature 15)
+- Exportador Prometheus (Feature 19)
+- Latency Percentiles por Cliente (Feature 14)
+- Semantic Caching (Feature 11)
+- LLM-as-Judge Feedback Loop (Feature 12)
+- Distributed Tracing Correlation (Feature 13)
+
 ## [0.8.1] - 2026-10-31
 ### Fixed
 - Graceful shutdown now drains in-flight event writes before exit to prevent silent token-event loss during restarts.

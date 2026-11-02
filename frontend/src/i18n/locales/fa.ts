@@ -11,7 +11,7 @@ export const fa: LocaleMessages = {
   'nav.settings': 'تنظیمات',
   'nav.import': 'وارد کردن',
   'nav.monitor': 'پایش',
-  'nav.control': 'کنترل',
+
 
   'shell.openNavigation': 'باز کردن ناوبری',
   'shell.collapse': 'جمع کردن',
@@ -341,11 +341,6 @@ export const fa: LocaleMessages = {
   'error.auth.unauthorized': 'دسترسی مجاز نیست.',
   'error.ui.unknown': 'خطایی رخ داد. دوباره تلاش کنید.',
 
-  'nav.sessions': 'گفتگوها',
-  'nav.cache': 'صرفه‌جویی حافظه نهان',
-  'nav.simulate': 'شبیه‌ساز هزینه',
-  'nav.prices': 'قیمت‌ها',
-  'nav.anomalies': 'ناهنجاری‌ها',
   'sessions.subtitle': 'هزینه هر گفتگو از سرصفحه نشست پروکسی یا رونوشت واردشده.',
   'sessions.columnSession': 'نشست',
   'sessions.columnWindow': 'آغاز',
@@ -411,7 +406,6 @@ export const fa: LocaleMessages = {
   'error.prices.invalid': 'قیمت نامعتبر است.',
   'error.prices.notFound': 'برای این مدل بازنویسی نیست.',
   'error.prices.persist': 'ذخیره فهرست ممکن نشد.',
-  'nav.clientKeys': "Client keys",
   'clientKeys.subtitle': "One key per client, with the identity and quota it grants.",
   'clientKeys.columnKey': "Key",
   'clientKeys.client': "Client",
