@@ -2,7 +2,7 @@
 
 Transparent AI token metering proxy between your CLI agents and LLM providers. Measures usage, calculates real cost, enforces budget limits.
 
-**v0.8.1** · Dashboard in 20 languages · local session import · [Português (Brasil)](README.pt-BR.md) · [Español](README.es.md) · [all quick starts](docs/i18n/README.md)
+**v0.13.0** · Dashboard in 20 languages · local session import · [Português (Brasil)](README.pt-BR.md) · [Español](README.es.md) · [all quick starts](docs/i18n/README.md)
 
 ## How it works
 
@@ -91,6 +91,8 @@ Dashboard: `http://127.0.0.1:8080/app/` — usage appears within 10s. It runs in
 - Security & Governance (v0.10.0) — Automatic PII Redaction for CPFs/emails/tokens (`internal/guard/pii.go`), Prompt Injection Guard with jailbreak heuristics (`internal/guard/injection.go`), Immutable Audit Log with chained integrity hash (`internal/db/audit.go`), and Scoped API Keys with granular permissions (`internal/guard/scoped_keys.go`)
 - Cost Optimization & FinOps (v0.11.0) — Budget Alerts with per-client/project threshold checks (`internal/guard/budget_alert.go`), Automatic Model Downgrade with configurable fallback (`internal/guard/downgrade.go`), Cost Allocation Tags for metadata-based cost splitting (`internal/guard/cost_tags.go`), Idle Timeout & Auto-Pause for inactive sessions (`internal/guard/idle_timeout.go`), and Weekly Executive Report with spend/usage summary (`internal/guard/executive_report.go`)
 - DX & Portfolio (v0.12.0) — Official CLI `odotoken-cli` with health/usage/keys subcommands (`cmd/odotoken-cli/`), and Self-Hosted Health Dashboard endpoint `/health` with JSON status (`internal/api/health_dashboard.go`)
+- Infrastructure as Code (v0.13.0) — Terraform Provider `terraform-provider-odotoken` with resources `odotoken_client_key`, `odotoken_price_rule`, `odotoken_guard_policy` and data sources `client_keys`, `models`, `health` (`providers/terraform/`)
+- Validation & QA (v0.13.0) — Load benchmark script (`scripts/benchmark.sh`) and security audit script (`scripts/security-audit.sh`) for external validation
 - Resilience — provider fallback on configured 429/5xx, per-project/client rate limits, durable alert retry, scheduled imports
 - Operations — `odotoken doctor` checks config, database, alerts and schedules; `odotoken export` and `odotoken prices` work without the daemon
 
